@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="SLText.Core/SLText.Core.csproj" />
+  <Project Path="SLText.View/SLText.View.csproj" />
+</Solution>

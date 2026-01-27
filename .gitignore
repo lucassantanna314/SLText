@@ -1,0 +1,20 @@
+# Pastas de compilação (Binários e Objetos)
+**/bin/
+**/obj/
+
+# Arquivos do Visual Studio Code
+.vscode/
+*.code-workspace
+
+# Arquivos de usuário e caches do .NET
+*.user
+*.userosscache
+*.sln.docstates
+
+# Pastas de pacotes NuGet
+/packages/
+/testresults/
+
+# Sistema Operacional (Linux/Mac)
+.DS_Store
+Thumbs.db
