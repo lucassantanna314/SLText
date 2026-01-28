@@ -10,7 +10,6 @@ public class StatusBarComponent : IComponent
     private readonly CursorManager _cursor;
     private readonly TextBuffer _buffer;
 
-    // Estilos (Cores típicas de editores Dark)
     private readonly SKPaint _bgPaint = new() { Color = new SKColor(40, 40, 40)  };
     private readonly SKPaint _textPaint = new() { Color = SKColors.White, IsAntialias = true };
     private readonly SKFont _font;
@@ -33,7 +32,6 @@ public class StatusBarComponent : IComponent
         float textY = Bounds.MidY - (metrics.Ascent + metrics.Descent) / 2;
 
         // --- LADO ESQUERDO: Contagem de Linhas e LINGUAGEM ---
-        // Agora incluímos o nome da linguagem aqui ou no centro
         string leftText = $"{_buffer.LineCount} linhas  |  {LanguageName}";
         canvas.DrawText(leftText, Bounds.Left + 15, textY, _font, _textPaint);
 
