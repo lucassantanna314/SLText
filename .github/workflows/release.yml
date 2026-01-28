@@ -1,0 +1,83 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ "main" ] # Ajuste para sua branch principal
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions: write-all
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: 8.0 # Ajuste para a versão do seu projeto
+
+    # --- 1. BUILD PARA WINDOWS ---
+    - name: Publish Windows
+      run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o ./publish/win
+
+    # --- 2. BUILD PARA LINUX ---
+    - name: Publish Linux
+      run: dotnet publish -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -o ./publish/linux
+
+    # --- 3. CRIAR PACOTE .DEB (LINUX) ---
+    - name: Create .DEB Package
+      run: |
+        VERSION="0.01.${{ github.run_number }}"
+        mkdir -p sltext-deb/DEBIAN
+        mkdir -p sltext-deb/usr/bin
+        mkdir -p sltext-deb/usr/share/applications
+        mkdir -p sltext-deb/usr/share/icons/hicolor/256x256/apps
+        
+        # Binário
+        cp ./publish/linux/SLText sltext-deb/usr/bin/sltext
+        chmod +x sltext-deb/usr/bin/sltext
+        
+        # Ícone (ajuste o caminho se necessário)
+        cp Assets/icon.png sltext-deb/usr/share/icons/hicolor/256x256/apps/sltext.png
+        
+        # Arquivo .desktop para o "Abrir com" funcionar
+        cat <<EOT > sltext-deb/usr/share/applications/sltext.desktop
+        [Desktop Entry]
+        Name=SLText
+        Exec=/usr/bin/sltext %f
+        Icon=sltext
+        Type=Application
+        Categories=Development;TextEditor;
+        MimeType=text/plain;
+        Terminal=false
+        EOT
+
+        # Arquivo de controle do Debian (Dependências aqui!)
+        cat <<EOT > sltext-deb/DEBIAN/control
+        Package: sltext
+        Version: $VERSION
+        Section: utils
+        Priority: optional
+        Architecture: amd64
+        Depends: libglfw3, libgles2-mesa, libx11-6, libxcursor1, libxi6, libxinerama1, libxrandr2, xclip, xsel
+        Maintainer: SeuNome <seuemail@exemplo.com>
+        Description: SLText Editor - Um editor de texto moderno com SkiaSharp.
+        EOT
+
+        dpkg-deb --build sltext-deb "sltext_${VERSION}_amd64.deb"
+
+    # --- 4. CRIAR INSTALADOR WINDOWS (INNO SETUP) ---
+    - name: Build Inno Setup (Windows)
+      uses: aybe/Inno-Setup-Action@v1.2.2
+      with:
+        filepath: ./Installer/setup.iss # Caminho para o seu arquivo .iss (veja abaixo)
+
+    # --- 5. UPLOAD DOS ARTEFATOS ---
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v0.${{ github.run_number }}
+        files: |
+          *.deb
+          ./Installer/Output/*.exe
