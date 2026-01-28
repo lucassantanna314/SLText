@@ -30,6 +30,11 @@ jobs:
           mkdir -p sltext-deb/usr/share/icons/hicolor/256x256/apps
           
           cp -r ./publish/linux/* sltext-deb/usr/bin/
+
+          if [ -f "sltext-deb/usr/bin/SLText" ]; then
+              mv sltext-deb/usr/bin/SLText sltext-deb/usr/bin/sltext
+          fi
+
           chmod +x sltext-deb/usr/bin/sltext
 
           cp SLText.View/Assets/icon.png sltext-deb/usr/share/icons/hicolor/256x256/apps/sltext.png
