@@ -36,31 +36,52 @@ public class InputHandler
 
         if (char.IsWhiteSpace(c))
         {
+            _currentTypingCommand.FinalizeCommand();
             _currentTypingCommand = null;
         }
     }
 
     public void HandleShortcut(bool ctrl, bool shift, string key)
     {
-        _currentTypingCommand = null;
-        
-        if (ctrl && !shift && key == "Z")
+        if (_currentTypingCommand != null)
         {
-            _undoManager.Undo();
-            return;
+            _currentTypingCommand.FinalizeCommand();
+            _currentTypingCommand = null;
         }
         
-        if (ctrl && !shift && key == "Y")
+        if (ctrl && !shift && key == "Z") { _undoManager.Undo(); return; }
+        if (ctrl && !shift && key == "Y") { _undoManager.Redo(); return; }
+        
+        if (!ctrl && !shift)
         {
-            _undoManager.Redo();
-            return;
+            switch (key)
+            {
+                case "UpArrow":    _cursor.MoveUp(); return;
+                case "DownArrow":  _cursor.MoveDown(); return;
+                case "LeftArrow":  _cursor.MoveLeft(); return;
+                case "RightArrow": _cursor.MoveRight(); return;
+                case "Enter":      _cursor.Enter(); return;
+                case "Backspace":  _cursor.Backspace(); return;
+                case "Delete":     _cursor.Delete(); return;
+            }
         }
         
         var lookup = (ctrl, shift, key);
-
         if (_shortcuts.TryGetValue(lookup, out var command))
         {
             _undoManager.ExecuteCommand(command);
         }
+    }
+    
+    public void HandlePaste(string text)
+    {
+        if (_currentTypingCommand != null)
+        {
+            _currentTypingCommand.FinalizeCommand();
+            _currentTypingCommand = null;
+        }
+
+        var pasteCmd = new PasteCommand(_buffer, _cursor, text);
+        _undoManager.ExecuteCommand(pasteCmd);
     }
 }

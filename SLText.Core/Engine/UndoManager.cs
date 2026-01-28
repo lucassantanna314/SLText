@@ -33,8 +33,12 @@ public class UndoManager
         if (_redoStack.Count > 0)
         {
             var command = _redoStack.Pop();
+            //Console.WriteLine($"Refazendo: {command.GetType().Name}");
             command.Execute(); 
             _history.Push(command);
+        }
+        else {
+            //Console.WriteLine("Nada para refazer!");
         }
     }
 }

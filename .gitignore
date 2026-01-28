@@ -4,6 +4,7 @@
 
 # Arquivos do Visual Studio Code
 .vscode/
+.idea
 *.code-workspace
 
 # Arquivos de usuário e caches do .NET

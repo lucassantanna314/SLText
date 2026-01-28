@@ -64,5 +64,15 @@ public class TextBuffer
     {
         this._lines = memento.Lines;
     }
+    
+    public void LoadText(string content)
+    {
+        _lines = content.Replace("\r", "")
+            .Split('\n')
+            .Select(line => line.ToList())
+            .ToList();
+    
+        if (_lines.Count == 0) _lines.Add(new List<char>());
+    }
 
 }
