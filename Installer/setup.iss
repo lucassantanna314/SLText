@@ -10,10 +10,16 @@ SolidCompression=yes
 ArchitecturesAllowed=x64
 
 [Files]
-; Binário principal
+; 1. Copia o executável principal separadamente para garantir permissões e atalhos
 Source: "..\publish\win\SLText.exe"; DestDir: "{app}"; Flags: ignoreversion
-; Pasta Assets
+
+; 2. Copia TODAS as DLLs e arquivos de runtime necessários (incluindo libSkiaSharp.dll)
+; Usamos * para pegar tudo, mas excluímos o .exe para não duplicar (opcional)
+Source: "..\publish\win\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs; Excludes: "SLText.exe"
+
+; 3. Garante que a pasta Assets seja incluída mantendo a estrutura
 Source: "..\publish\win\Assets\*"; DestDir: "{app}\Assets"; Flags: ignoreversion recursesubdirs
+
 
 [Icons]
 Name: "{group}\SLText"; Filename: "{app}\SLText.exe"

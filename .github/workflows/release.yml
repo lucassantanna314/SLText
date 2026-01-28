@@ -29,7 +29,7 @@ jobs:
           mkdir -p sltext-deb/usr/share/applications
           mkdir -p sltext-deb/usr/share/icons/hicolor/256x256/apps
           
-          cp ./publish/linux/SLText sltext-deb/usr/bin/sltext
+          cp -r ./publish/linux/* sltext-deb/usr/bin/
           chmod +x sltext-deb/usr/bin/sltext
 
           cp SLText.View/Assets/icon.png sltext-deb/usr/share/icons/hicolor/256x256/apps/sltext.png
@@ -51,9 +51,9 @@ jobs:
           Section: utils
           Priority: optional
           Architecture: amd64
-          Depends: libglfw3, libgl1, libgles2, libx11-6, libxcursor1, libxi6, libxinerama1, libxrandr2, xclip, xsel
-          Maintainer: SeuNome <seuemail@exemplo.com>
-          Description: SLText Editor moderno com SkiaSharp.
+          Depends: libglfw3, libgl1, libgles2, libx11-6, libxcursor1, libxi6, libxinerama1, libxrandr2, xclip, xsel, libfontconfig1
+          Maintainer: LucasSantanna <lucassantanna1995@gmail.com>
+          Description: SLText Moderno com SkiaSharp C#.
           EOT
 
           dpkg-deb --build sltext-deb "SLText_${VERSION}_Linux_x64.deb"
@@ -83,7 +83,7 @@ jobs:
       - name: Compile Inno Setup
         shell: pwsh
         run: |
-          iscc ./Installer/setup.iss /DAppVersion=0.${{ github.run_number }} /F"SLText_0.01.${{ github.run_number }}_Windows_x64"
+          iscc ./Installer/setup.iss /DAppVersion=0.${{ github.run_number }} /F"SLText_0.${{ github.run_number }}_Windows_x64"
 
       - name: Upload Windows Artifact
         uses: actions/upload-artifact@v4
@@ -101,7 +101,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.01.${{ github.run_number }}
+          tag_name: v0.${{ github.run_number }}
           files: |
             linux-deb/*.deb
             windows-exe/*.exe
