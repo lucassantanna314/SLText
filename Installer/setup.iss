@@ -5,7 +5,6 @@ DefaultDirName={autopf}\SLText
 DefaultGroupName=SLText
 OutputDir=Output
 OutputBaseFilename=SLText_Setup_x64
-; Ajuste o caminho voltando uma pasta (..) para sair de 'Installer' e entrar em 'SLText.View'
 SetupIconFile=..\SLText.View\Assets\icon.ico
 Compression=lzma
 SolidCompression=yes
@@ -13,8 +12,10 @@ ArchitecturesAllowed=x64
 
 [Files]
 ; Binário principal
-Source: "..\publish\win\SLText.exe"; DestDir: "{app}"; Flags: ignoreversion; Pasta Assets com fontes e ícones
+Source: "..\publish\win\SLText.exe"; DestDir: "{app}"; Flags: ignoreversion
+; Pasta Assets
 Source: "..\publish\win\Assets\*"; DestDir: "{app}\Assets"; Flags: ignoreversion recursesubdirs
+
 [Icons]
 Name: "{group}\SLText"; Filename: "{app}\SLText.exe"
 Name: "{autodesktop}\SLText"; Filename: "{app}\SLText.exe"
