@@ -5,7 +5,6 @@ on:
     branches: [ "main" ]
 
 jobs:
-  # --- JOB PARA LINUX (.DEB) ---
   build-linux:
     runs-on: ubuntu-latest
     steps:
@@ -16,8 +15,13 @@ jobs:
         with:
           dotnet-version: 8.0
 
+      # Forçamos o restore do projeto específico
+      - name: Restore dependencies
+        run: dotnet restore SLText.View/SLText.View.csproj
+
+      # Rodamos o publish apontando para o arquivo .csproj específico
       - name: Publish Linux
-        run: dotnet publish -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -o ./publish/linux
+        run: dotnet publish SLText.View/SLText.View.csproj -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -p:AssemblyName=SLText -o ./publish/linux
 
       - name: Create .DEB Package
         run: |
@@ -27,10 +31,10 @@ jobs:
           mkdir -p sltext-deb/usr/share/applications
           mkdir -p sltext-deb/usr/share/icons/hicolor/256x256/apps
           
+          # O binário agora se chama SLText devido ao parâmetro AssemblyName
           cp ./publish/linux/SLText sltext-deb/usr/bin/sltext
           chmod +x sltext-deb/usr/bin/sltext
           
-          # Copia o ícone (certifique-se que o caminho Assets/icon.png existe)
           cp Assets/icon.png sltext-deb/usr/share/icons/hicolor/256x256/apps/sltext.png
           
           cat <<EOT > sltext-deb/usr/share/applications/sltext.desktop
@@ -63,7 +67,6 @@ jobs:
           name: linux-deb
           path: "*.deb"
 
-  # --- JOB PARA WINDOWS (.EXE) ---
   build-windows:
     runs-on: windows-latest
     steps:
@@ -74,11 +77,14 @@ jobs:
         with:
           dotnet-version: 8.0
 
-      - name: Publish Windows
-        run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o ./publish/win
+      - name: Restore dependencies
+        run: dotnet restore SLText.View/SLText.View.csproj
 
-      # O Inno Setup já vem instalado nos runners windows-latest do GitHub!
+      - name: Publish Windows
+        run: dotnet publish SLText.View/SLText.View.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:AssemblyName=SLText -o ./publish/win
+
       - name: Compile Inno Setup
+        shell: pwsh
         run: |
           iscc ./Installer/setup.iss /DAppVersion=0.01.${{ github.run_number }}
 
@@ -88,7 +94,6 @@ jobs:
           name: windows-exe
           path: ./Installer/Output/*.exe
 
-  # --- JOB FINAL PARA CRIAR O RELEASE NO GITHUB ---
   release:
     needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
