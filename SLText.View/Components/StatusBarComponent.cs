@@ -14,6 +14,8 @@ public class StatusBarComponent : IComponent
     private readonly SKPaint _bgPaint = new() { Color = new SKColor(40, 40, 40)  };
     private readonly SKPaint _textPaint = new() { Color = SKColors.White, IsAntialias = true };
     private readonly SKFont _font;
+    
+    public string LanguageName { get; set; } = "Plain Text";
 
     public string FileInfo { get; set; } = "Novo Arquivo";
 
@@ -26,27 +28,22 @@ public class StatusBarComponent : IComponent
 
     public void Render(SKCanvas canvas)
     {
-        // Fundo
         canvas.DrawRect(Bounds, _bgPaint);
-
         _font.GetFontMetrics(out var metrics);
         float textY = Bounds.MidY - (metrics.Ascent + metrics.Descent) / 2;
 
-        // --- LADO ESQUERDO: Contagem de Linhas ---
-        string countText = $"{_buffer.LineCount} linhas";
-        canvas.DrawText(countText, Bounds.Left + 15, textY, _font, _textPaint);
+        // --- LADO ESQUERDO: Contagem de Linhas e LINGUAGEM ---
+        // Agora incluímos o nome da linguagem aqui ou no centro
+        string leftText = $"{_buffer.LineCount} linhas  |  {LanguageName}";
+        canvas.DrawText(leftText, Bounds.Left + 15, textY, _font, _textPaint);
 
         // --- CENTRO: Nome do Arquivo ---
         float fileTextWidth = _font.MeasureText(FileInfo);
-        float fileX = Bounds.MidX - (fileTextWidth / 2);
-        canvas.DrawText(FileInfo, fileX, textY, _font, _textPaint);
+        canvas.DrawText(FileInfo, Bounds.MidX - (fileTextWidth / 2), textY, _font, _textPaint);
 
         // --- DIREITA: Posição do Cursor ---
         string positionText = $"Ln {_cursor.Line + 1}, Col {_cursor.Column + 1}";
-        float posTextWidth = _font.MeasureText(positionText);
-        // Margem de 15px da borda direita
-        float posX = Bounds.Right - posTextWidth - 15;
-        canvas.DrawText(positionText, posX, textY, _font, _textPaint);
+        canvas.DrawText(positionText, Bounds.Right - _font.MeasureText(positionText) - 15, textY, _font, _textPaint);
     }
 
     public void Update(double deltaTime) { }

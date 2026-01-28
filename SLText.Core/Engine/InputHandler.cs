@@ -17,9 +17,13 @@ public class InputHandler
         _cursor = cursor;
         _buffer = buffer;
         _undoManager = undoManager;
-
+        
+        // move com control
         _shortcuts.Add((true, false, "RightArrow"), new MoveWordRightCommand(_cursor, _buffer));
         _shortcuts.Add((true, false, "LeftArrow"), new MoveWordLeftCommand(_cursor, _buffer));
+        
+        _shortcuts.Add((true, false, "UpArrow"), new MoveFourLinesUpCommand(_cursor));
+        _shortcuts.Add((true, false, "DownArrow"), new MoveFourLinesDownCommand(_cursor));
         
         _shortcuts.Add((true, false, "S"), new SaveCommand());
     }

@@ -6,6 +6,7 @@ using SLText.View.Components;
 using System.Runtime.InteropServices;
 using NativeFileDialogSharp;
 using Silk.NET.Core;
+using SLText.View.Styles;
 using SLText.View.UI.Input;
 using TextCopy;
 
@@ -29,6 +30,9 @@ public class WindowManager
     private CursorManager _cursor;
     private string? _currentFilePath;
     private bool _isDirty;
+    
+    private readonly SyntaxProvider _syntaxProvider = new(); 
+    private List<(string pattern, SKColor color)> _currentRules = new();
 
     public WindowManager(TextBuffer buffer, CursorManager cursor, InputHandler input, string? initialFilePath = null)
     {
@@ -85,7 +89,6 @@ public class WindowManager
         var input = _window.CreateInput();
         foreach (var keyboard in input.Keyboards)
         {
-            keyboard.KeyChar += (k, c) => _inputHandler.HandleTextInput(c);
             keyboard.KeyDown += OnKeyDown;
             
             keyboard.KeyChar += (k, c) => 
@@ -110,6 +113,7 @@ public class WindowManager
             {
                 string content = File.ReadAllText(_currentFilePath);
                 _buffer.LoadText(content);
+                _statusBar.LanguageName = _editor.UpdateSyntax(_currentFilePath);
                 UpdateTitle(); 
             }
             catch (Exception ex)
@@ -146,14 +150,21 @@ public class WindowManager
         bool ctrl = k.IsKeyPressed(Key.ControlLeft) || k.IsKeyPressed(Key.ControlRight);
         bool shift = k.IsKeyPressed(Key.ShiftLeft) || k.IsKeyPressed(Key.ShiftRight);
         
+        bool cursorMoved = false;
+        
         if (ctrl && key == Key.O)
         {
-            var result = Dialog.FileOpen("txt,cs,json"); // Filtros de extensão
+            var result = Dialog.FileOpen("txt,cs,html,htm,css,js,razor,cshtml,xml,csproj,gcode,nc,cnc,tap");
             if (result.IsOk)
             {
                 _currentFilePath = result.Path;
-                string content = File.ReadAllText(_currentFilePath);
+
+                string content = File.ReadAllText(_currentFilePath).Replace("\t", "    ");
                 _buffer.LoadText(content);
+    
+                string langName = _editor.UpdateSyntax(_currentFilePath);
+                _statusBar.LanguageName = langName;
+    
                 _cursor.SetPosition(0, 0); 
                 _editor.ScrollY = 0;
                 _isDirty = false;
@@ -166,7 +177,7 @@ public class WindowManager
         {
             if (string.IsNullOrEmpty(_currentFilePath))
             {
-                var result = Dialog.FileSave("txt,cs");
+                var result = Dialog.FileSave("txt,cs,html,htm,css,js,razor,cshtml,xml,csproj,gcode,nc,cnc,tap");
                 if (result.IsOk)
                 {
                     _currentFilePath = result.Path;
@@ -186,6 +197,7 @@ public class WindowManager
             if (!string.IsNullOrEmpty(text))
             {
                 _inputHandler.HandlePaste(text);
+                cursorMoved = true;
             }
             return;
         }
@@ -194,21 +206,27 @@ public class WindowManager
         {
             string shortcutKey = KeyboardMapper.MapShortcutKey(key);
             _inputHandler.HandleShortcut(ctrl, shift, shortcutKey);
-            return;
-        }
-        
-        string? navKey = KeyboardMapper.MapNavigationKey(key);
-        if (navKey != null)
+            cursorMoved = true;
+            
+        } else
         {
-            _inputHandler.HandleShortcut(false, false, navKey);
-    
-            if (key == Key.Enter || key == Key.Backspace || key == Key.Delete || (ctrl && key == Key.V))
+            string? navKey = KeyboardMapper.MapNavigationKey(key);
+            if (navKey != null)
             {
-                if (!_isDirty) { _isDirty = true; UpdateTitle(); }
+                _inputHandler.HandleShortcut(false, false, navKey);
+                cursorMoved = true;
+
+                if (key == Key.Enter || key == Key.Backspace || key == Key.Delete)
+                {
+                    if (!_isDirty) { _isDirty = true; UpdateTitle(); }
+                }
             }
         }
-        
-        _editor.RequestScrollToCursor();
+
+        if (cursorMoved)
+        {
+            _editor.RequestScrollToCursor();
+        }
     }
 
     private void OnRender(double dt)
