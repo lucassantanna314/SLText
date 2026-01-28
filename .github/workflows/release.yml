@@ -27,12 +27,12 @@ jobs:
           mkdir -p sltext-deb/DEBIAN
           mkdir -p sltext-deb/usr/bin
           mkdir -p sltext-deb/usr/share/applications
-          mkdir -p sltext-deb/usr/share/icons/hicolor/256x256/apps
+          mkdir -p sltext-deb/usr/share/pixmaps
           
           cp ./publish/linux/SLText sltext-deb/usr/bin/sltext
           chmod +x sltext-deb/usr/bin/sltext
 
-          cp SLText.View/Assets/icon.png sltext-deb/usr/share/icons/hicolor/256x256/apps/sltext.png
+          cp SLText.View/Assets/icon.png sltext-deb/usr/share/pixmaps/sltext.png
           
           cat <<EOT > sltext-deb/usr/share/applications/sltext.desktop
           [Desktop Entry]
@@ -41,7 +41,6 @@ jobs:
           Icon=sltext
           Type=Application
           Categories=Development;TextEditor;
-          MimeType=text/plain;
           Terminal=false
           EOT
 
@@ -51,7 +50,7 @@ jobs:
           Section: utils
           Priority: optional
           Architecture: amd64
-          Depends: libglfw3, libgles2-mesa, libx11-6, libxcursor1, libxi6, libxinerama1, libxrandr2, xclip, xsel
+          Depends: libglfw3, libgl1-mesa-glx, libgles2, libx11-6, libxcursor1, libxi6, libxinerama1, libxrandr2, xclip, xsel
           Maintainer: SeuNome <seuemail@exemplo.com>
           Description: SLText Editor moderno com SkiaSharp.
           EOT
