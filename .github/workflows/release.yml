@@ -31,7 +31,8 @@ jobs:
           
           cp ./publish/linux/SLText sltext-deb/usr/bin/sltext
           chmod +x sltext-deb/usr/bin/sltext
-          cp Assets/icon.png sltext-deb/usr/share/icons/hicolor/256x256/apps/sltext.png
+
+          cp SLText.View/Assets/icon.png sltext-deb/usr/share/icons/hicolor/256x256/apps/sltext.png
           
           cat <<EOT > sltext-deb/usr/share/applications/sltext.desktop
           [Desktop Entry]

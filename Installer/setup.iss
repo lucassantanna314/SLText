@@ -5,17 +5,14 @@ DefaultDirName={autopf}\SLText
 DefaultGroupName=SLText
 OutputDir=Output
 OutputBaseFilename=SLText_Setup_x64
-SetupIconFile=..\Assets\icon.ico
-Compression=lzma
+SetupIconFile=..\SLText.View\Assets\icon.icoCompression=lzma
 SolidCompression=yes
 ArchitecturesAllowed=x64
 
 [Files]
 ; Binário principal
-Source: "..\publish\win\SLText.exe"; DestDir: "{app}"; Flags: ignoreversion
-; Pasta Assets com fontes e ícones
+Source: "..\publish\win\SLText.exe"; DestDir: "{app}"; Flags: ignoreversion; Pasta Assets com fontes e ícones
 Source: "..\publish\win\Assets\*"; DestDir: "{app}\Assets"; Flags: ignoreversion recursesubdirs
-
 [Icons]
 Name: "{group}\SLText"; Filename: "{app}\SLText.exe"
 Name: "{autodesktop}\SLText"; Filename: "{app}\SLText.exe"
