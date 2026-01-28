@@ -10,4 +10,10 @@
     <Folder Include="IO\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Reference Include="TextCopy">
+      <HintPath>..\..\..\.nuget\packages\textcopy\6.2.1\lib\net6.0\TextCopy.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
 </Project>

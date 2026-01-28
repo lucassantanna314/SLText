@@ -32,9 +32,15 @@ public class MoveWordLeftCommand : ICommand
         string text = _buffer.GetLines().ElementAt(line);
         int i = col - 1;
 
-        while (i > 0 && char.IsWhiteSpace(text[i])) i--;
-
-        while (i > 0 && !char.IsWhiteSpace(text[i - 1])) i--;
+        while (i > 0 && char.IsWhiteSpace(text[i - 1])) i--;
+        if (i <= 0) { _cursor.SetPosition(line, 0); return; }
+        
+        bool isLetterOrDigit = char.IsLetterOrDigit(text[i - 1]);
+        
+        while (i > 0 && !char.IsWhiteSpace(text[i - 1]) && char.IsLetterOrDigit(text[i - 1]) == isLetterOrDigit)
+        {
+            i--;
+        }
 
         _cursor.SetPosition(line, i);
     }

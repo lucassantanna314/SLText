@@ -20,7 +20,42 @@ public class TextBuffer
         _lines[line].Insert(column, c);
     }
     
+    public void Insert(int line, int column, string text)
+    {
+        _lines[line].InsertRange(column, text.ToCharArray());
+    }
+    
     //actions
+    
+    public void RemoveRange(int startLine, int startCol, int endLine, int endCol)
+    {
+        // 1. Se a seleção for na mesma linha
+        if (startLine == endLine)
+        {
+            int count = endCol - startCol;
+            if (count > 0)
+            {
+                _lines[startLine].RemoveRange(startCol, count);
+            }
+            return;
+        }
+
+        // Seleção multi-linha
+        // Salva o que sobrou da última linha selecionada
+        var suffix = _lines[endLine].Skip(endCol).ToList();
+
+        // Remove o conteúdo do início da seleção na primeira linha
+        int charsToRemoveFirstLine = _lines[startLine].Count - startCol;
+        _lines[startLine].RemoveRange(startCol, charsToRemoveFirstLine);
+
+        // Remove as linhas intermediárias e a linha final
+        int linesToRemove = endLine - startLine;
+        _lines.RemoveRange(startLine + 1, linesToRemove);
+
+        // "Costura" o sufixo da antiga última linha na primeira linha
+        _lines[startLine].AddRange(suffix);
+    }
+    
     public void BreakLine(int line, int column)
     {
         var restOfLine = _lines[line].Skip(column).ToList();
@@ -56,7 +91,7 @@ public class TextBuffer
     
     public TextMemento TakeSnapshot(int line, int col)
     {
-        var linesCopy = _lines.Select(line => line.ToList()).ToList();
+        var linesCopy = _lines.Select(l => l.ToList()).ToList();
         return new TextMemento(linesCopy, line, col);
     }
 

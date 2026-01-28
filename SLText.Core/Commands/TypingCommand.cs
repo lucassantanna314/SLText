@@ -26,7 +26,7 @@ public class TypingCommand : ICommand
         {
             _buffer.RestoreSnapshot(_afterState);
             _cursor.SetPosition(_afterState.CursorLine, _afterState.CursorColumn);
-        } 
+        }
     }
 
     public void Undo()

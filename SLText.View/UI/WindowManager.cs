@@ -30,9 +30,21 @@ public class WindowManager
     private CursorManager _cursor;
     private string? _currentFilePath;
     private bool _isDirty;
+    private bool _isMouseDown;
+    
+    private EditorTheme _currentTheme = EditorTheme.Dark;
+    
+    private string _lastDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     
     private readonly SyntaxProvider _syntaxProvider = new(); 
     private List<(string pattern, SKColor color)> _currentRules = new();
+
+    private void ApplyTheme(EditorTheme theme)
+    {
+        _currentTheme = theme;
+        _editor.SetTheme(theme);
+        _statusBar.ApplyTheme(theme);
+    }
 
     public WindowManager(TextBuffer buffer, CursorManager cursor, InputHandler input, string? initialFilePath = null)
     {
@@ -40,7 +52,6 @@ public class WindowManager
         options.Size = new Silk.NET.Maths.Vector2D<int>(800, 600);
         options.Title = "SLText";
         _window = Window.Create(options);
-        _editor = new EditorComponent(buffer, cursor);
         _inputHandler = input;
         
         _buffer = buffer;
@@ -100,12 +111,22 @@ public class WindowManager
         
         foreach (var mouse in input.Mice)
         {
+            mouse.MouseDown += OnMouseDown;
+            mouse.MouseMove += OnMouseMove; 
+            mouse.MouseUp += OnMouseUp;     
             mouse.Scroll += OnMouseScroll;
         }
 
-        var handle = _window.Native!.Win32!.Value.Hwnd;
-        int useDarkMode = 1;
-        DwmSetWindowAttribute(handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDarkMode, sizeof(int));
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            var win32 = _window.Native?.Win32;
+            if (win32.HasValue)
+            {
+                var handle = win32.Value.Hwnd;
+                int useDarkMode = 1;
+                DwmSetWindowAttribute(handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDarkMode, sizeof(int));
+            }
+        }
         
         if (!string.IsNullOrEmpty(_currentFilePath) && File.Exists(_currentFilePath))
         {
@@ -126,12 +147,67 @@ public class WindowManager
             UpdateTitle(); 
         }
         
+        ApplyTheme(EditorTheme.Dark);
     }
 
     private void OnMouseScroll(IMouse mouse, ScrollWheel scroll)
     {
         _editor.ScrollY -= scroll.Y * 60;
         if (_editor.ScrollY < 0) _editor.ScrollY = 0;
+    }
+    
+    private void OnMouseDown(IMouse mouse, MouseButton button)
+    {
+        _inputHandler.ResetTypingState();
+        
+        if (button == MouseButton.Left)
+        {
+            _isMouseDown = true;
+            
+            var pos = mouse.Position;
+        
+            // Verifica se o clique foi dentro da área do editor
+            if (_editor.Bounds.Contains(pos.X, pos.Y))
+            {
+                var (line, col) = _editor.GetTextPositionFromMouse(pos.X, pos.Y);
+            
+                // Finaliza qualquer comando de digitação pendente antes de mover
+                _inputHandler.HandleShortcut(false, false, "None"); 
+                
+                _cursor.ClearSelection();
+                _cursor.SetPosition(line, col);
+                _cursor.StartSelection();
+            }
+        }
+    }
+    
+    private void OnMouseMove(IMouse mouse, System.Numerics.Vector2 position)
+    {
+        if (_isMouseDown)
+        {
+            if (_editor.Bounds.Contains(position.X, position.Y))
+            {
+                var (line, col) = _editor.GetTextPositionFromMouse(position.X, position.Y);
+            
+                _cursor.SetPosition(line, col);
+                _editor.RequestScrollToCursor();
+            }
+        }
+    }
+    
+    private void OnMouseUp(IMouse mouse, MouseButton button)
+    {
+        if (button == MouseButton.Left)
+        {
+            _isMouseDown = false;
+        
+            var range = _cursor.GetSelectionRange();
+            if (range != null && range.Value.startLine == range.Value.endLine && 
+                range.Value.startCol == range.Value.endCol)
+            {
+                _cursor.ClearSelection();
+            }
+        }
     }
     
     private void UpdateTitle()
@@ -154,10 +230,12 @@ public class WindowManager
         
         if (ctrl && key == Key.O)
         {
-            var result = Dialog.FileOpen("txt,cs,html,htm,css,js,razor,cshtml,xml,csproj,gcode,nc,cnc,tap");
+            var result = Dialog.FileOpen("txt,cs,html,htm,css,js,razor,cshtml,xml,csproj,gcode,nc,cnc,tap", _lastDirectory);
             if (result.IsOk)
             {
                 _currentFilePath = result.Path;
+                
+                _lastDirectory = Path.GetDirectoryName(_currentFilePath) ?? _lastDirectory;
 
                 string content = File.ReadAllText(_currentFilePath).Replace("\t", "    ");
                 _buffer.LoadText(content);
@@ -177,10 +255,14 @@ public class WindowManager
         {
             if (string.IsNullOrEmpty(_currentFilePath))
             {
-                var result = Dialog.FileSave("txt,cs,html,htm,css,js,razor,cshtml,xml,csproj,gcode,nc,cnc,tap");
+                var result = Dialog.FileSave("txt,cs,html,htm,css,js,razor,cshtml,xml,csproj,gcode,nc,cnc,tap", _lastDirectory);
                 if (result.IsOk)
                 {
                     _currentFilePath = result.Path;
+                    _lastDirectory = Path.GetDirectoryName(_currentFilePath) ?? _lastDirectory;
+                    
+                    string langName = _editor.UpdateSyntax(_currentFilePath);
+                    _statusBar.LanguageName = langName;
                 }
                 else return;
             }
@@ -191,13 +273,28 @@ public class WindowManager
             return;
         }
         
+        if (ctrl && key == Key.C)
+        {
+            _inputHandler.HandleCopy();
+            return;
+        }
+        
         if (ctrl && key == Key.V)
         {
-            string? text = ClipboardService.GetText();
-            if (!string.IsNullOrEmpty(text))
+            try 
             {
-                _inputHandler.HandlePaste(text);
-                cursorMoved = true;
+                string? text = ClipboardService.GetText();
+                if (!string.IsNullOrEmpty(text))
+                {
+                    _inputHandler.HandlePaste(text);
+                    _isDirty = true;
+                    UpdateTitle();
+                    _editor.RequestScrollToCursor();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Erro ao acessar clipboard: " + ex.Message);
             }
             return;
         }
@@ -232,7 +329,7 @@ public class WindowManager
     private void OnRender(double dt)
     {
         var canvas = _surface.Canvas;
-        canvas.Clear(new SKColor(30, 30, 30));
+        canvas.Clear(_currentTheme.Background);
 
         float width = _window.Size.X;
         float height = _window.Size.Y;

@@ -1,5 +1,6 @@
 using SLText.Core.Commands;
 using SLText.Core.Interfaces;
+using TextCopy;
 
 namespace SLText.Core.Engine;
 
@@ -12,6 +13,15 @@ public class InputHandler
     
     private TypingCommand? _currentTypingCommand;
     
+    private readonly Dictionary<char, char> _pairs = new()
+    {
+        { '(', ')' },
+        { '[', ']' },
+        { '{', '}' },
+        { '"', '"' },
+        { '\'', '\'' }
+    };
+    
     public InputHandler(CursorManager cursor, TextBuffer buffer, UndoManager undoManager)
     {
         _cursor = cursor;
@@ -22,6 +32,12 @@ public class InputHandler
         _shortcuts.Add((true, false, "RightArrow"), new MoveWordRightCommand(_cursor, _buffer));
         _shortcuts.Add((true, false, "LeftArrow"), new MoveWordLeftCommand(_cursor, _buffer));
         
+        _shortcuts.Add((true, true, "RightArrow"), new MoveWordRightCommand(_cursor, _buffer));
+        _shortcuts.Add((true, true, "LeftArrow"), new MoveWordLeftCommand(_cursor, _buffer));
+        
+        _shortcuts.Add((false, false, "Tab"), new InsertTabCommand(_buffer, _cursor));
+        _shortcuts.Add((true, false, "Backspace"), new DeleteWordLeftCommand(_cursor, _buffer));
+        
         _shortcuts.Add((true, false, "UpArrow"), new MoveFourLinesUpCommand(_cursor));
         _shortcuts.Add((true, false, "DownArrow"), new MoveFourLinesDownCommand(_cursor));
         
@@ -30,17 +46,19 @@ public class InputHandler
     
     public void HandleTextInput(char c)
     {
+        if (_cursor.HasSelection) DeleteSelectedText();
+    
         if (_currentTypingCommand == null)
         {
             _currentTypingCommand = new TypingCommand(_buffer, _cursor);
-            _undoManager.ExecuteCommand(_currentTypingCommand);
         }
-
+    
         _cursor.Insert(c);
 
-        if (char.IsWhiteSpace(c))
+        if (char.IsWhiteSpace(c) || char.IsPunctuation(c))
         {
-            _currentTypingCommand.FinalizeCommand();
+            _currentTypingCommand.FinalizeCommand(); 
+            _undoManager.AddExternalCommand(_currentTypingCommand); 
             _currentTypingCommand = null;
         }
     }
@@ -50,13 +68,39 @@ public class InputHandler
         if (_currentTypingCommand != null)
         {
             _currentTypingCommand.FinalizeCommand();
+            _undoManager.AddExternalCommand(_currentTypingCommand); 
             _currentTypingCommand = null;
+        }
+        
+        bool isMovement = IsMovementKey(key);
+        if (isMovement)
+        {
+            if (shift) _cursor.StartSelection();
+            else _cursor.ClearSelection();
+        }
+        
+        if (ctrl && !shift && key == "A")
+        {
+            _cursor.SelectAll();
+            return;
+        }
+        
+        if (ctrl && !shift && key == "X") 
+        { 
+            HandleCut(); 
+            return; 
         }
         
         if (ctrl && !shift && key == "Z") { _undoManager.Undo(); return; }
         if (ctrl && !shift && key == "Y") { _undoManager.Redo(); return; }
         
-        if (!ctrl && !shift)
+        if (_cursor.HasSelection && IsDestructiveKey(key))
+        {
+            DeleteSelectedText();
+            if (key == "Backspace" || key == "Delete") return; 
+        }
+        
+        if (!ctrl) 
         {
             switch (key)
             {
@@ -64,8 +108,8 @@ public class InputHandler
                 case "DownArrow":  _cursor.MoveDown(); return;
                 case "LeftArrow":  _cursor.MoveLeft(); return;
                 case "RightArrow": _cursor.MoveRight(); return;
-                case "Enter":      _cursor.Enter(); return;
-                case "Backspace":  _cursor.Backspace(); return;
+                case "Enter":      if(!shift) { _cursor.Enter(); return; } break;
+                case "Backspace":  if(!shift) { _cursor.Backspace(); return; } break;
                 case "Delete":     _cursor.Delete(); return;
             }
         }
@@ -79,13 +123,79 @@ public class InputHandler
     
     public void HandlePaste(string text)
     {
+        ResetTypingState();
+        
+        if (_cursor.HasSelection)
+        {
+            DeleteSelectedText(); 
+        }
+
+        var pasteCmd = new PasteCommand(_buffer, _cursor, text);
+        _undoManager.ExecuteCommand(pasteCmd);
+       
+    }
+    
+    public void HandleCut()
+    {
+        if (!_cursor.HasSelection) return;
+
+        HandleCopy();
+        DeleteSelectedText();
+    }
+    
+    public void ResetTypingState()
+    {
         if (_currentTypingCommand != null)
         {
             _currentTypingCommand.FinalizeCommand();
             _currentTypingCommand = null;
         }
+    }
+    
+    private bool IsMovementKey(string key) => 
+        key.Contains("Arrow") || key == "Home" || key == "End" || key == "PageUp" || key == "PageDown";
 
-        var pasteCmd = new PasteCommand(_buffer, _cursor, text);
-        _undoManager.ExecuteCommand(pasteCmd);
+    private bool IsDestructiveKey(string key) => 
+        key == "Backspace" || key == "Delete" || key == "Enter" || key == "Tab";
+    
+    private void DeleteSelectedText()
+    {
+        var deleteCmd = new DeleteSelectionCommand(_buffer, _cursor);
+        _undoManager.ExecuteCommand(deleteCmd);
+        _cursor.ClearSelection();
+    }
+    
+    public void HandleCopy()
+    {
+        
+        var range = _cursor.GetSelectionRange();
+        if (range == null) return;
+
+        var (sLine, sCol, eLine, eCol) = range.Value;
+    
+        // Extrai o texto do buffer
+        List<string> selectedTextLines = new();
+        var lines = _buffer.GetLines().ToList();
+
+        if (sLine == eLine)
+        {
+            selectedTextLines.Add(lines[sLine].Substring(sCol, eCol - sCol));
+        }
+        else
+        {
+            // Primeira linha
+            selectedTextLines.Add(lines[sLine].Substring(sCol));
+            // Linhas do meio
+            for (int i = sLine + 1; i < eLine; i++)
+                selectedTextLines.Add(lines[i]);
+            // Última linha
+            selectedTextLines.Add(lines[eLine].Substring(0, eCol));
+        }
+
+        string fullText = string.Join(Environment.NewLine, selectedTextLines);
+    
+        try {
+            ClipboardService.SetText(fullText);
+        } catch {  }
     }
 }

@@ -3,6 +3,11 @@ namespace SLText.Core.Engine;
 public class CursorManager
 {
     private readonly TextBuffer _buffer;
+    
+    public int? SelectionAnchorLine { get; private set; }
+    public int? SelectionAnchorColumn { get; private set; }
+    
+    public bool HasSelection => SelectionAnchorLine.HasValue;
 
     public CursorManager(TextBuffer buffer)
     {
@@ -12,6 +17,35 @@ public class CursorManager
     public int Line { get; private set; }
     public int Column { get; private set; }
     private int _desiredColumn = 0;
+    
+    //selection
+    public void StartSelection()
+    {
+        if (!HasSelection)
+        {
+            SelectionAnchorLine = Line;
+            SelectionAnchorColumn = Column;
+        }
+    }
+    
+    public void ClearSelection()
+    {
+        SelectionAnchorLine = null;
+        SelectionAnchorColumn = null;
+    }
+    
+    public (int startLine, int startCol, int endLine, int endCol)? GetSelectionRange()
+    {
+        if (!HasSelection) return null;
+
+        var start = (l: SelectionAnchorLine.Value, c: SelectionAnchorColumn.Value);
+        var end = (l: Line, c: Column);
+
+        if (start.l < end.l || (start.l == end.l && start.c < end.c))
+            return (start.l, start.c, end.l, end.c);
+        
+        return (end.l, end.c, start.l, start.c);
+    }
 
     public void MoveUp()
     {
@@ -62,12 +96,67 @@ public class CursorManager
 
     public void Enter()
     {
-        _buffer.BreakLine(Line, Column);
-        Line++;
-        Column = 0;
-        _desiredColumn = 0;
-    }
+        var lines = _buffer.GetLines().ToList();
+        string currentLineText = lines[Line];
+        int safeColumn = Math.Clamp(Column, 0, currentLineText.Length);
 
+        string baseIndentation = "";
+        foreach (char c in currentLineText)
+        {
+            if (c == ' ' || c == '\t') baseIndentation += c;
+            else break;
+        }
+
+        bool isBetweenBraces = safeColumn > 0 && safeColumn < currentLineText.Length &&
+                               currentLineText[safeColumn - 1] == '{' && 
+                               currentLineText[safeColumn] == '}';
+
+        if (isBetweenBraces)
+        {
+            _buffer.Delete(Line, safeColumn); 
+
+            _buffer.BreakLine(Line, safeColumn);
+            Line++;
+
+            string midIndentation = baseIndentation + "    ";
+            _buffer.Insert(Line, 0, midIndentation);
+
+            _buffer.BreakLine(Line, midIndentation.Length);
+            _buffer.Insert(Line + 1, 0, baseIndentation + "}");
+
+            Column = midIndentation.Length;
+        }
+        else
+        {
+            _buffer.BreakLine(Line, safeColumn);
+            Line++;
+        
+            if (!string.IsNullOrEmpty(baseIndentation))
+            {
+                _buffer.Insert(Line, 0, baseIndentation);
+                Column = baseIndentation.Length;
+            }
+            else
+            {
+                Column = 0;
+            }
+        }
+
+        _desiredColumn = Column;
+    }
+    
+    public void SelectAll()
+    {
+        SelectionAnchorLine = 0;
+        SelectionAnchorColumn = 0;
+
+        Line = _buffer.LineCount - 1;
+        Column = _buffer.GetLineLength(Line);
+    
+        _desiredColumn = Column;
+    }
+    
+    
     public void Backspace()
     {
         if (Column > 0)

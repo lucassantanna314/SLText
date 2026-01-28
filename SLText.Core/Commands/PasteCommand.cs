@@ -28,11 +28,20 @@ public class PasteCommand : ICommand
             return;
         }
 
-        foreach (char c in _textToPaste)
+        string normalized = _textToPaste.Replace("\r\n", "\n").Replace("\r", "\n");
+        string[] lines = normalized.Split('\n');
+
+        for (int i = 0; i < lines.Length; i++)
         {
-            if (c == '\r') continue; 
-            if (c == '\n') _cursor.Enter();
-            else _cursor.Insert(c);
+            _buffer.Insert(_cursor.Line, _cursor.Column, lines[i]);
+            
+            for (int j = 0; j < lines[i].Length; j++) _cursor.MoveRight();
+
+            if (i < lines.Length - 1)
+            {
+                _buffer.BreakLine(_cursor.Line, _cursor.Column);
+                _cursor.SetPosition(_cursor.Line + 1, 0); 
+            }
         }
         
         _afterState = _buffer.TakeSnapshot(_cursor.Line, _cursor.Column);

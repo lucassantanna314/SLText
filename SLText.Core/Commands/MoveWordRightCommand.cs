@@ -31,7 +31,13 @@ public class MoveWordRightCommand : ICommand
         int i = col;
         
         while (i < lineLength && char.IsWhiteSpace(text[i])) i++;
-        while (i < lineLength && !char.IsWhiteSpace(text[i])) i++;
+        if (i >= lineLength) { _cursor.SetPosition(line, i); return; }
+        bool isLetterOrDigit = char.IsLetterOrDigit(text[i]);
+        
+        while (i < lineLength && !char.IsWhiteSpace(text[i]) && char.IsLetterOrDigit(text[i]) == isLetterOrDigit)
+        {
+            i++;
+        }
         
         _cursor.SetPosition(line, i);
     }

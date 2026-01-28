@@ -1,6 +1,7 @@
 using SkiaSharp;
 using SLText.Core.Engine;
 using SLText.View.Abstractions;
+using SLText.View.Styles;
 
 namespace SLText.View.Components;
 
@@ -10,19 +11,42 @@ public class StatusBarComponent : IComponent
     private readonly CursorManager _cursor;
     private readonly TextBuffer _buffer;
 
-    private readonly SKPaint _bgPaint = new() { Color = new SKColor(40, 40, 40)  };
-    private readonly SKPaint _textPaint = new() { Color = SKColors.White, IsAntialias = true };
+    private readonly SKPaint _bgPaint = new();
+    private readonly SKPaint _textPaint = new() { IsAntialias = true };
     private readonly SKFont _font;
     
+    private EditorTheme _theme = EditorTheme.Dark;
+    
     public string LanguageName { get; set; } = "Plain Text";
-
-    public string FileInfo { get; set; } = "Novo Arquivo";
+    public string FileInfo { get; set; } = "New File";
 
     public StatusBarComponent(CursorManager cursor, TextBuffer buffer)
     {
         _cursor = cursor;
         _buffer = buffer;
-        _font = new SKFont(SKTypeface.FromFamilyName("Segoe UI"), 12);
+        
+        string fontPath = Path.Combine(AppContext.BaseDirectory, "Assets", "JetBrainsMono-Regular.ttf");
+        SKTypeface typeface;
+
+        if (File.Exists(fontPath))
+        {
+            typeface = SKTypeface.FromFile(fontPath);
+        }
+        else
+        {
+            typeface = SKTypeface.FromFamilyName("monospace", SKFontStyle.Normal);
+        }
+        
+        _font = new SKFont(typeface, 12);
+        
+        ApplyTheme(_theme);
+    }
+    
+    public void ApplyTheme(EditorTheme theme)
+    {
+        _theme = theme;
+        _bgPaint.Color = _theme.StatusBarBackground;
+        _textPaint.Color = _theme.Foreground;
     }
 
     public void Render(SKCanvas canvas)

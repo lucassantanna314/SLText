@@ -18,7 +18,14 @@ public class EditorComponent : IComponent
     private EditorTheme _theme = EditorTheme.Dark;
     private List<(string pattern, SKColor color)> _currentRules = new();
     
-    public void SetTheme(EditorTheme theme) => _theme = theme;
+    public void SetTheme(EditorTheme theme) 
+    {
+        _theme = theme;
+    
+        _gutterPaint.Color = _theme.GutterForeground;
+        _textPaint.Color = _theme.Foreground;
+        _cursorPaint.Color = _theme.Cursor;
+    }
     private readonly SyntaxProvider _syntaxProvider = new();
     
     public string UpdateSyntax(string? filePath) 
@@ -27,43 +34,41 @@ public class EditorComponent : IComponent
         return _syntaxProvider.GetLanguageName(filePath);
     }
     
-    private readonly SKPaint _gutterPaint = new() 
-    { 
-        Color = new SKColor(100, 100, 100), 
-        IsAntialias = true 
-    };
-    
-    private readonly SKPaint _gutterBgPaint = new() 
-    { 
-        Color = new SKColor(40, 40, 40) 
-    };
-    
+    private readonly SKPaint _gutterPaint = new() { IsAntialias = true };    
     public void RequestScrollToCursor() => _needScrollToCursor = true;
     
     private readonly SKFont _font;
-    private readonly SKPaint _textPaint = new() 
-    { 
-        Color = SKColors.White, 
-        IsAntialias = true 
-    };
-    private readonly SKPaint _cursorPaint = new() { Color = SKColors.Chocolate };
-
+    private readonly SKPaint _textPaint = new() { IsAntialias = true };
+    private readonly SKPaint _cursorPaint = new() { IsAntialias = true };
     private bool _showCursor = true;
     private double _cursorTimer; 
     private const double BlinkInterval = 0.5; 
+    private readonly SKPaint _sharedAuxPaint = new() { IsAntialias = true };
 
     public EditorComponent(TextBuffer buffer, CursorManager cursor)
     {
         _buffer = buffer;
         _cursor = cursor;
         
-        var typeface = SKTypeface.FromFamilyName("Consolas");
+        string fontPath = Path.Combine(AppContext.BaseDirectory, "Assets", "JetBrainsMono-Regular.ttf");
         
-        _font = new SKFont(typeface, 18)
+        SKTypeface typeface;
+
+        if (File.Exists(fontPath))
         {
-            Edging = SKFontEdging.SubpixelAntialias, 
+            typeface = SKTypeface.FromFile(fontPath);
+        }
+        else
+        {
+            typeface = SKTypeface.FromFamilyName("monospace", SKFontStyle.Normal);
+            Console.WriteLine($"Fonte não encontrada em {fontPath}. Usando fallback.");
+        }
+
+        _font = new SKFont(typeface, 16)
+        {
+            Edging = SKFontEdging.SubpixelAntialias,
             Hinting = SKFontHinting.Full,
-            Subpixel = true 
+            Subpixel = true
         };
     }
 
@@ -71,6 +76,8 @@ public class EditorComponent : IComponent
 
     public void Render(SKCanvas canvas)
 {
+    canvas.Clear(_theme.Background);
+
     _font.GetFontMetrics(out var metrics);
     _lineHeight = metrics.Descent - metrics.Ascent + 4;
     
@@ -83,11 +90,9 @@ public class EditorComponent : IComponent
     canvas.Save();
     canvas.ClipRect(Bounds);
     
-    using (var gutterBgPaint = new SKPaint { Color = _theme.GutterBackground })
-    {
-        var gutterRect = new SKRect(Bounds.Left, Bounds.Top, Bounds.Left + gutterWidth, Bounds.Bottom);
-        canvas.DrawRect(gutterRect, gutterBgPaint);
-    }
+    _sharedAuxPaint.Color = _theme.GutterBackground;
+    var gutterRect = new SKRect(Bounds.Left, Bounds.Top, Bounds.Left + gutterWidth, Bounds.Bottom);
+    canvas.DrawRect(gutterRect, _sharedAuxPaint);
 
     canvas.Translate(0, -ScrollY);
     
@@ -98,26 +103,29 @@ public class EditorComponent : IComponent
         if (yPos - _lineHeight > Bounds.Bottom + ScrollY) break;
         if (yPos + _lineHeight < Bounds.Top + ScrollY) continue;
 
-        // --- HIGHLIGHT DA LINHA ---
+        // --- DESTAQUE DA LINHA ATUAL ---
         if (i == _cursor.Line)
         {
-            using var highlightPaint = new SKPaint { Color = _theme.LineHighlight };
+            _sharedAuxPaint.Color = _theme.LineHighlight;
             var lineRect = new SKRect(
                 Bounds.Left + gutterWidth, 
                 yPos + metrics.Ascent, 
                 Bounds.Right, 
                 yPos + metrics.Descent
             );
-            canvas.DrawRect(lineRect, highlightPaint);
+            canvas.DrawRect(lineRect, _sharedAuxPaint);
         }
 
         // --- NÚMEROS DA LINHA ---
         string lineNum = (i + 1).ToString();
         float lineNumX = Bounds.Left + (gutterWidth - _font.MeasureText(lineNum) - 10);
-        _gutterPaint.Color = _theme.GutterForeground;
+        _gutterPaint.Color = _theme.GutterForeground; 
         canvas.DrawText(lineNum, lineNumX, yPos, _font, _gutterPaint);
+        
+        // --- SELEÇÃO ---
+        RenderSelection(canvas, i, yPos, gutterWidth, metrics);
 
-        // --- TEXTO ---
+        // --- TEXTO (SINTAXE) ---
         float textX = Bounds.Left + gutterWidth + 10; 
         RenderHighlightedLine(canvas, lines[i], textX, yPos);
 
@@ -141,6 +149,7 @@ public class EditorComponent : IComponent
     
     canvas.Restore();
 }
+    
     private record TextToken(string Text, SKColor Color);
 
     private List<TextToken> TokenizeLine(string text)
@@ -238,6 +247,88 @@ public class EditorComponent : IComponent
         if (_needScrollToCursor) {
             ScrollToCursor();
             _needScrollToCursor = false; 
+        }
+    }
+    
+    public (int line, int col) GetTextPositionFromMouse(float mouseX, float mouseY)
+    {
+        _font.GetFontMetrics(out var metrics);
+        float localY = mouseY - Bounds.Top + ScrollY;
+    
+        // Calcula a linha
+        int line = (int)(localY / _lineHeight);
+        line = Math.Clamp(line, 0, _buffer.LineCount - 1);
+    
+        // Calcula a largura do gutter (margem dos números)
+        string maxLineStr = _buffer.LineCount.ToString();
+        float gutterWidth = _font.MeasureText(maxLineStr) + 20;
+    
+        // Calcula a coluna
+        float relativeX = mouseX - (Bounds.Left + gutterWidth + 10);
+        if (relativeX <= 0) return (line, 0);
+
+        var lineText = _buffer.GetLines().ElementAt(line);
+        int col = 0;
+        float currentWidth = 0;
+
+        // Percorre os caracteres para ver qual está mais próximo do clique
+        for (int i = 0; i < lineText.Length; i++)
+        {
+            float charWidth = _font.MeasureText(lineText[i].ToString());
+            if (currentWidth + (charWidth / 2) > relativeX) break;
+        
+            currentWidth += charWidth;
+            col++;
+        }
+
+        return (line, col);
+    }
+    
+    private void RenderSelection(SKCanvas canvas, int lineIndex, float yPos, float gutterWidth, SKFontMetrics metrics)
+    {
+        var range = _cursor.GetSelectionRange();
+        if (range == null) return;
+
+        var (sLine, sCol, eLine, eCol) = range.Value;
+
+        if (lineIndex >= sLine && lineIndex <= eLine)
+        {
+            var lines = _buffer.GetLines().ToList();
+            string text = lines[lineIndex];
+            float textX = Bounds.Left + gutterWidth + 10;
+
+            float startX = 0;
+            float endX = 0;
+
+            if (lineIndex == sLine && lineIndex == eLine)
+            {
+                startX = _font.MeasureText(text.Substring(0, Math.Min(sCol, text.Length)));
+                endX = _font.MeasureText(text.Substring(0, Math.Min(eCol, text.Length)));
+            }
+            else if (lineIndex == sLine)
+            {
+                startX = _font.MeasureText(text.Substring(0, Math.Min(sCol, text.Length)));
+                endX = _font.MeasureText(text) + 10; 
+            }
+            else if (lineIndex == eLine)
+            {
+                startX = 0;
+                endX = _font.MeasureText(text.Substring(0, Math.Min(eCol, text.Length)));
+            }
+            else
+            {
+                startX = 0;
+                endX = _font.MeasureText(text) + 10;
+            }
+
+            using var selectionPaint = new SKPaint { Color = _theme.SelectionBackground };
+            var selectionRect = new SKRect(
+                textX + startX,
+                yPos + metrics.Ascent,
+                textX + endX,
+                yPos + metrics.Descent
+            );
+            canvas.DrawRect(selectionRect, selectionPaint);
         }
     }
 }
