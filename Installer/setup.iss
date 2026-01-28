@@ -5,7 +5,9 @@ DefaultDirName={autopf}\SLText
 DefaultGroupName=SLText
 OutputDir=Output
 OutputBaseFilename=SLText_Setup_x64
-SetupIconFile=..\SLText.View\Assets\icon.icoCompression=lzma
+; Ajuste o caminho voltando uma pasta (..) para sair de 'Installer' e entrar em 'SLText.View'
+SetupIconFile=..\SLText.View\Assets\icon.ico
+Compression=lzma
 SolidCompression=yes
 ArchitecturesAllowed=x64
 
