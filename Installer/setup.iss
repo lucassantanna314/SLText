@@ -4,7 +4,6 @@ AppVersion={#AppVersion}
 DefaultDirName={autopf}\SLText
 DefaultGroupName=SLText
 OutputDir=Output
-OutputBaseFilename=SLText_Setup_x64
 SetupIconFile=..\SLText.View\Assets\icon.ico
 Compression=lzma
 SolidCompression=yes

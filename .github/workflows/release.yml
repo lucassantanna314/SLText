@@ -56,7 +56,7 @@ jobs:
           Description: SLText Editor moderno com SkiaSharp.
           EOT
 
-          dpkg-deb --build sltext-deb "sltext_${VERSION}_amd64.deb"
+          dpkg-deb --build sltext-deb "SLText_${VERSION}_Linux_x64.deb"
 
       - name: Upload Linux Artifact
         uses: actions/upload-artifact@v4
@@ -83,7 +83,7 @@ jobs:
       - name: Compile Inno Setup
         shell: pwsh
         run: |
-          iscc ./Installer/setup.iss /DAppVersion=0.01.${{ github.run_number }}
+          iscc ./Installer/setup.iss /DAppVersion=0.01.${{ github.run_number }} /F"SLText_0.01.${{ github.run_number }}_Windows_x64"
 
       - name: Upload Windows Artifact
         uses: actions/upload-artifact@v4
