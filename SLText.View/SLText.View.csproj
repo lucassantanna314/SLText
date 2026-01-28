@@ -32,6 +32,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
+    <AssemblyName>SLText</AssemblyName>
   </PropertyGroup>
 
 </Project>

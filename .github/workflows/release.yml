@@ -15,13 +15,11 @@ jobs:
         with:
           dotnet-version: 8.0
 
-      # Forçamos o restore do projeto específico
-      - name: Restore dependencies
-        run: dotnet restore SLText.View/SLText.View.csproj
+      - name: Restore
+        run: dotnet restore
 
-      # Rodamos o publish apontando para o arquivo .csproj específico
       - name: Publish Linux
-        run: dotnet publish SLText.View/SLText.View.csproj -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -p:AssemblyName=SLText -o ./publish/linux
+        run: dotnet publish SLText.View/SLText.View.csproj -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -o ./publish/linux
 
       - name: Create .DEB Package
         run: |
@@ -31,10 +29,8 @@ jobs:
           mkdir -p sltext-deb/usr/share/applications
           mkdir -p sltext-deb/usr/share/icons/hicolor/256x256/apps
           
-          # O binário agora se chama SLText devido ao parâmetro AssemblyName
           cp ./publish/linux/SLText sltext-deb/usr/bin/sltext
           chmod +x sltext-deb/usr/bin/sltext
-          
           cp Assets/icon.png sltext-deb/usr/share/icons/hicolor/256x256/apps/sltext.png
           
           cat <<EOT > sltext-deb/usr/share/applications/sltext.desktop
@@ -77,11 +73,11 @@ jobs:
         with:
           dotnet-version: 8.0
 
-      - name: Restore dependencies
-        run: dotnet restore SLText.View/SLText.View.csproj
+      - name: Restore
+        run: dotnet restore
 
       - name: Publish Windows
-        run: dotnet publish SLText.View/SLText.View.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:AssemblyName=SLText -o ./publish/win
+        run: dotnet publish SLText.View/SLText.View.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o ./publish/win
 
       - name: Compile Inno Setup
         shell: pwsh
@@ -101,7 +97,6 @@ jobs:
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
