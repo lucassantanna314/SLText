@@ -2,82 +2,105 @@ name: Build and Release
 
 on:
   push:
-    branches: [ "main" ] # Ajuste para sua branch principal
+    branches: [ "main" ]
 
 jobs:
-  build:
+  # --- JOB PARA LINUX (.DEB) ---
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0
+
+      - name: Publish Linux
+        run: dotnet publish -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -o ./publish/linux
+
+      - name: Create .DEB Package
+        run: |
+          VERSION="0.01.${{ github.run_number }}"
+          mkdir -p sltext-deb/DEBIAN
+          mkdir -p sltext-deb/usr/bin
+          mkdir -p sltext-deb/usr/share/applications
+          mkdir -p sltext-deb/usr/share/icons/hicolor/256x256/apps
+          
+          cp ./publish/linux/SLText sltext-deb/usr/bin/sltext
+          chmod +x sltext-deb/usr/bin/sltext
+          
+          # Copia o ícone (certifique-se que o caminho Assets/icon.png existe)
+          cp Assets/icon.png sltext-deb/usr/share/icons/hicolor/256x256/apps/sltext.png
+          
+          cat <<EOT > sltext-deb/usr/share/applications/sltext.desktop
+          [Desktop Entry]
+          Name=SLText
+          Exec=/usr/bin/sltext %f
+          Icon=sltext
+          Type=Application
+          Categories=Development;TextEditor;
+          MimeType=text/plain;
+          Terminal=false
+          EOT
+
+          cat <<EOT > sltext-deb/DEBIAN/control
+          Package: sltext
+          Version: $VERSION
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Depends: libglfw3, libgles2-mesa, libx11-6, libxcursor1, libxi6, libxinerama1, libxrandr2, xclip, xsel
+          Maintainer: SeuNome <seuemail@exemplo.com>
+          Description: SLText Editor moderno com SkiaSharp.
+          EOT
+
+          dpkg-deb --build sltext-deb "sltext_${VERSION}_amd64.deb"
+
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-deb
+          path: "*.deb"
+
+  # --- JOB PARA WINDOWS (.EXE) ---
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0
+
+      - name: Publish Windows
+        run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o ./publish/win
+
+      # O Inno Setup já vem instalado nos runners windows-latest do GitHub!
+      - name: Compile Inno Setup
+        run: |
+          iscc ./Installer/setup.iss /DAppVersion=0.01.${{ github.run_number }}
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: ./Installer/Output/*.exe
+
+  # --- JOB FINAL PARA CRIAR O RELEASE NO GITHUB ---
+  release:
+    needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
     permissions: write-all
-
     steps:
-    - uses: actions/checkout@v3
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
 
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v3
-      with:
-        dotnet-version: 8.0 # Ajuste para a versão do seu projeto
-
-    # --- 1. BUILD PARA WINDOWS ---
-    - name: Publish Windows
-      run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o ./publish/win
-
-    # --- 2. BUILD PARA LINUX ---
-    - name: Publish Linux
-      run: dotnet publish -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -o ./publish/linux
-
-    # --- 3. CRIAR PACOTE .DEB (LINUX) ---
-    - name: Create .DEB Package
-      run: |
-        VERSION="0.01.${{ github.run_number }}"
-        mkdir -p sltext-deb/DEBIAN
-        mkdir -p sltext-deb/usr/bin
-        mkdir -p sltext-deb/usr/share/applications
-        mkdir -p sltext-deb/usr/share/icons/hicolor/256x256/apps
-        
-        # Binário
-        cp ./publish/linux/SLText sltext-deb/usr/bin/sltext
-        chmod +x sltext-deb/usr/bin/sltext
-        
-        # Ícone (ajuste o caminho se necessário)
-        cp Assets/icon.png sltext-deb/usr/share/icons/hicolor/256x256/apps/sltext.png
-        
-        # Arquivo .desktop para o "Abrir com" funcionar
-        cat <<EOT > sltext-deb/usr/share/applications/sltext.desktop
-        [Desktop Entry]
-        Name=SLText
-        Exec=/usr/bin/sltext %f
-        Icon=sltext
-        Type=Application
-        Categories=Development;TextEditor;
-        MimeType=text/plain;
-        Terminal=false
-        EOT
-
-        # Arquivo de controle do Debian (Dependências aqui!)
-        cat <<EOT > sltext-deb/DEBIAN/control
-        Package: sltext
-        Version: $VERSION
-        Section: utils
-        Priority: optional
-        Architecture: amd64
-        Depends: libglfw3, libgles2-mesa, libx11-6, libxcursor1, libxi6, libxinerama1, libxrandr2, xclip, xsel
-        Maintainer: SeuNome <seuemail@exemplo.com>
-        Description: SLText Editor - Um editor de texto moderno com SkiaSharp.
-        EOT
-
-        dpkg-deb --build sltext-deb "sltext_${VERSION}_amd64.deb"
-
-    # --- 4. CRIAR INSTALADOR WINDOWS (INNO SETUP) ---
-    - name: Build Inno Setup (Windows)
-      uses: aybe/Inno-Setup-Action@v1.2.2
-      with:
-        filepath: ./Installer/setup.iss # Caminho para o seu arquivo .iss (veja abaixo)
-
-    # --- 5. UPLOAD DOS ARTEFATOS ---
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: v0.${{ github.run_number }}
-        files: |
-          *.deb
-          ./Installer/Output/*.exe
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.01.${{ github.run_number }}
+          files: |
+            linux-deb/*.deb
+            windows-exe/*.exe
