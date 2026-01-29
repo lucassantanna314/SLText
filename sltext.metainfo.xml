@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>com.lucassantanna314.sltext</id>
+  <id>sltext.desktop</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
   <name>SLText</name>
   <summary>Editor de texto moderno escrito em C# e SkiaSharp</summary>
   <description>
-    <p>SLText é um editor de texto de alto desempenho focado em desenvolvedores,</p> 
-    <p>Utilizando renderização acelerada por GPU.</p>
+    <p>SLText é um editor de texto de alto desempenho </p>
+    <p>focado em desenvolvedores, utilizando renderização acelerada por GPU.</p>
   </description>
   <launchable type="desktop-id">sltext.desktop</launchable>
   <screenshots>
@@ -16,5 +16,5 @@
       <image>https://raw.githubusercontent.com/lucassantanna314/SLText/main/SLText.View/Assets/Screenshot.png</image>
     </screenshot>
   </screenshots>
-  <url type="homepage">https://github.com/seu-usuario/seu-repo</url>
+  <url type="homepage">https://github.com/lucassantanna314/SLText</url>
 </component>
