@@ -1,0 +1,20 @@
+changelog:
+  exclude:
+    authors:
+      - github-actions[bot]
+  categories:
+    - title: "🚀 Novas Funcionalidades"
+      labels:
+        - enhancement
+        - feature
+    - title: "🐛 Correções de Bugs"
+      labels:
+        - bug
+    - title: "🛠️ Refatoração e Melhorias"
+      labels:
+        - refactor
+        - documentation
+    - title: "📦 Dependências e Build"
+      labels:
+        - dependencies
+        - build

@@ -110,6 +110,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v0.${{ github.run_number }}
+          generate_release_notes: true
           files: |
             linux-deb/*.deb
             windows-exe/*.exe
