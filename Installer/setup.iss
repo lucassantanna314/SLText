@@ -1,25 +1,22 @@
 [Setup]
 AppName=SLText
 AppVersion={#AppVersion}
+AppPublisher=Lucas Santanna
+AppPublisherURL=https://github.com/lucassantanna314/SLText
 DefaultDirName={autopf}\SLText
 DefaultGroupName=SLText
 OutputDir=Output
+LicenseFile=..\LICENSE
 SetupIconFile=..\SLText.View\Assets\icon.ico
 Compression=lzma
 SolidCompression=yes
 ArchitecturesAllowed=x64
 
 [Files]
-; 1. Copia o executável principal separadamente para garantir permissões e atalhos
+; ... (seus arquivos continuam iguais)
 Source: "..\publish\win\SLText.exe"; DestDir: "{app}"; Flags: ignoreversion
-
-; 2. Copia TODAS as DLLs e arquivos de runtime necessários (incluindo libSkiaSharp.dll)
-; Usamos * para pegar tudo, mas excluímos o .exe para não duplicar (opcional)
 Source: "..\publish\win\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs; Excludes: "SLText.exe"
-
-; 3. Garante que a pasta Assets seja incluída mantendo a estrutura
 Source: "..\publish\win\Assets\*"; DestDir: "{app}\Assets"; Flags: ignoreversion recursesubdirs
-
 
 [Icons]
 Name: "{group}\SLText"; Filename: "{app}\SLText.exe"

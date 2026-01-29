@@ -28,6 +28,7 @@ jobs:
           mkdir -p sltext-deb/usr/bin
           mkdir -p sltext-deb/usr/share/applications
           mkdir -p sltext-deb/usr/share/icons/hicolor/256x256/apps
+          mkdir -p sltext-deb/usr/share/metainfo
           
           cp -r ./publish/linux/* sltext-deb/usr/bin/
 
@@ -39,6 +40,8 @@ jobs:
 
           cp SLText.View/Assets/icon.png sltext-deb/usr/share/icons/hicolor/256x256/apps/sltext.png
           
+          cp sltext.metainfo.xml sltext-deb/usr/share/metainfo/com.lucassantanna314.sltext.metainfo.xml
+
           cat <<EOT > sltext-deb/usr/share/applications/sltext.desktop
           [Desktop Entry]
           Name=SLText
