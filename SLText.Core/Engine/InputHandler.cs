@@ -57,6 +57,9 @@ public class InputHandler
         _shortcuts.Add((true, true, "UpArrow"), new MoveLineCommand(_buffer, _cursor, -1));
         _shortcuts.Add((true, true, "DownArrow"), new MoveLineCommand(_buffer, _cursor, 1));
         
+        _shortcuts.Add((true, true, "K"), new DeleteLineCommand(_buffer, _cursor));
+        _shortcuts.Add((true, false, "L"), new SelectLineCommand(_cursor, _buffer));
+        
         _shortcuts.Add((true, false, "D"), new DuplicateLineCommand(_buffer, _cursor));
         
         _saveCommand = new SaveFileCommand(dialogs, _buffer, (path) => onFileAction(path, false), () => _lastDirectory);  
@@ -193,7 +196,11 @@ public class InputHandler
     
     public void HandleCut()
     {
-        if (!_cursor.HasSelection) return;
+        if (!_cursor.HasSelection) 
+        {
+            _undoManager.ExecuteCommand(new DeleteLineCommand(_buffer, _cursor));
+            return;
+        }
 
         HandleCopy();
         DeleteSelectedText();
