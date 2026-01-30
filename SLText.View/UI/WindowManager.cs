@@ -38,6 +38,8 @@ public class WindowManager
     
     private readonly SyntaxProvider _syntaxProvider = new(); 
     private List<(string pattern, SKColor color)> _currentRules = new();
+    
+    private MouseHandler _mouseHandler;
 
     private void ApplyTheme(EditorTheme theme)
     {
@@ -52,14 +54,36 @@ public class WindowManager
         options.Size = new Silk.NET.Maths.Vector2D<int>(800, 600);
         options.Title = "SLText";
         _window = Window.Create(options);
-        _inputHandler = input;
+        
         
         _buffer = buffer;
         _cursor = cursor;
+        _inputHandler = input;
         
+        _inputHandler.OnScrollRequested += (deltaX, deltaY) => 
+{
+    if (deltaX != 0)
+    {
+        _editor.ScrollX -= deltaX;
+        if (_editor.ScrollX < 0) _editor.ScrollX = 0;
+        
+        float maxScrollX = _editor.GetMaxHorizontalScroll();
+        if (_editor.ScrollX > maxScrollX) _editor.ScrollX = maxScrollX;
+    }
+
+    if (deltaY != 0)
+    {
+        _editor.ScrollY -= deltaY;
+        if (_editor.ScrollY < 0) _editor.ScrollY = 0;
+
+        float maxScrollY = Math.Max(0, (_editor.GetTotalLines() * _editor.LineHeight) - (_editor.Bounds.Height / 2));
+        if (_editor.ScrollY > maxScrollY) _editor.ScrollY = maxScrollY;
+    }
+};
+        
+        // 2. componentes visuais
         _editor = new EditorComponent(buffer, cursor);
         _statusBar = new StatusBarComponent(cursor, buffer);
-        _inputHandler = input;
         
         _currentFilePath = initialFilePath;
         
@@ -109,14 +133,21 @@ public class WindowManager
             };
         }
         
+        _mouseHandler = new MouseHandler(_editor, _cursor, _inputHandler, input);
+        
         foreach (var mouse in input.Mice)
         {
-            mouse.MouseDown += OnMouseDown;
-            mouse.MouseMove += OnMouseMove; 
-            mouse.MouseUp += OnMouseUp;     
-            mouse.Scroll += OnMouseScroll;
+            mouse.MouseDown += _mouseHandler.OnMouseDown;
+            mouse.MouseMove += _mouseHandler.OnMouseMove; 
+            mouse.MouseUp += _mouseHandler.OnMouseUp;     
+            mouse.Scroll += _mouseHandler.OnMouseScroll;
         }
-
+        
+        _inputHandler.OnScrollRequested += (deltaX, deltaY) => 
+        {
+            _editor.ApplyScroll(deltaX, deltaY);
+        };
+        
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
             var win32 = _window.Native?.Win32;
@@ -149,66 +180,6 @@ public class WindowManager
         
         ApplyTheme(EditorTheme.Dark);
     }
-
-    private void OnMouseScroll(IMouse mouse, ScrollWheel scroll)
-    {
-        _editor.ScrollY -= scroll.Y * 60;
-        if (_editor.ScrollY < 0) _editor.ScrollY = 0;
-    }
-    
-    private void OnMouseDown(IMouse mouse, MouseButton button)
-    {
-        _inputHandler.ResetTypingState();
-        
-        if (button == MouseButton.Left)
-        {
-            _isMouseDown = true;
-            
-            var pos = mouse.Position;
-        
-            // Verifica se o clique foi dentro da área do editor
-            if (_editor.Bounds.Contains(pos.X, pos.Y))
-            {
-                var (line, col) = _editor.GetTextPositionFromMouse(pos.X, pos.Y);
-            
-                // Finaliza qualquer comando de digitação pendente antes de mover
-                _inputHandler.HandleShortcut(false, false, "None"); 
-                
-                _cursor.ClearSelection();
-                _cursor.SetPosition(line, col);
-                _cursor.StartSelection();
-            }
-        }
-    }
-    
-    private void OnMouseMove(IMouse mouse, System.Numerics.Vector2 position)
-    {
-        if (_isMouseDown)
-        {
-            if (_editor.Bounds.Contains(position.X, position.Y))
-            {
-                var (line, col) = _editor.GetTextPositionFromMouse(position.X, position.Y);
-            
-                _cursor.SetPosition(line, col);
-                _editor.RequestScrollToCursor();
-            }
-        }
-    }
-    
-    private void OnMouseUp(IMouse mouse, MouseButton button)
-    {
-        if (button == MouseButton.Left)
-        {
-            _isMouseDown = false;
-        
-            var range = _cursor.GetSelectionRange();
-            if (range != null && range.Value.startLine == range.Value.endLine && 
-                range.Value.startCol == range.Value.endCol)
-            {
-                _cursor.ClearSelection();
-            }
-        }
-    }
     
     private void UpdateTitle()
     {
@@ -225,106 +196,36 @@ public class WindowManager
     {
         bool ctrl = k.IsKeyPressed(Key.ControlLeft) || k.IsKeyPressed(Key.ControlRight);
         bool shift = k.IsKeyPressed(Key.ShiftLeft) || k.IsKeyPressed(Key.ShiftRight);
-        
-        bool cursorMoved = false;
-        
-        if (ctrl && key == Key.O)
-        {
-            var result = Dialog.FileOpen("txt,cs,html,htm,css,js,razor,cshtml,xml,csproj,gcode,nc,cnc,tap", _lastDirectory);
-            if (result.IsOk)
-            {
-                _currentFilePath = result.Path;
-                
-                _lastDirectory = Path.GetDirectoryName(_currentFilePath) ?? _lastDirectory;
+    
+        string? mappedKey = KeyboardMapper.Normalize(key);
+        if (mappedKey == null) return;
 
-                string content = File.ReadAllText(_currentFilePath).Replace("\t", "    ");
-                _buffer.LoadText(content);
-    
-                string langName = _editor.UpdateSyntax(_currentFilePath);
-                _statusBar.LanguageName = langName;
-    
-                _cursor.SetPosition(0, 0); 
-                _editor.ScrollY = 0;
-                _isDirty = false;
+        if (ctrl && key == Key.C) { _inputHandler.HandleCopy(); return; }
+        if (ctrl && key == Key.V) 
+        {
+            string? text = ClipboardService.GetText();
+            if (!string.IsNullOrEmpty(text)) 
+            {
+                _inputHandler.HandlePaste(text);
+                _isDirty = true;
                 UpdateTitle();
             }
             return;
         }
-        
-        if (ctrl && key == Key.S)
-        {
-            if (string.IsNullOrEmpty(_currentFilePath))
-            {
-                var result = Dialog.FileSave("txt,cs,html,htm,css,js,razor,cshtml,xml,csproj,gcode,nc,cnc,tap", _lastDirectory);
-                if (result.IsOk)
-                {
-                    _currentFilePath = result.Path;
-                    _lastDirectory = Path.GetDirectoryName(_currentFilePath) ?? _lastDirectory;
-                    
-                    string langName = _editor.UpdateSyntax(_currentFilePath);
-                    _statusBar.LanguageName = langName;
-                }
-                else return;
-            }
 
-            File.WriteAllText(_currentFilePath, _buffer.GetAllText());
-            _isDirty = false;
+        _inputHandler.HandleShortcut(ctrl, shift, mappedKey);
+
+        _editor.RequestScrollToCursor();
+    
+        if (!IsNavigationOnly(key) && !ctrl && !_isDirty) 
+        {
+            _isDirty = true;
             UpdateTitle();
-            return;
-        }
-        
-        if (ctrl && key == Key.C)
-        {
-            _inputHandler.HandleCopy();
-            return;
-        }
-        
-        if (ctrl && key == Key.V)
-        {
-            try 
-            {
-                string? text = ClipboardService.GetText();
-                if (!string.IsNullOrEmpty(text))
-                {
-                    _inputHandler.HandlePaste(text);
-                    _isDirty = true;
-                    UpdateTitle();
-                    _editor.RequestScrollToCursor();
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("Erro ao acessar clipboard: " + ex.Message);
-            }
-            return;
-        }
-        
-        if (ctrl || shift)
-        {
-            string shortcutKey = KeyboardMapper.MapShortcutKey(key);
-            _inputHandler.HandleShortcut(ctrl, shift, shortcutKey);
-            cursorMoved = true;
-            
-        } else
-        {
-            string? navKey = KeyboardMapper.MapNavigationKey(key);
-            if (navKey != null)
-            {
-                _inputHandler.HandleShortcut(false, false, navKey);
-                cursorMoved = true;
-
-                if (key == Key.Enter || key == Key.Backspace || key == Key.Delete)
-                {
-                    if (!_isDirty) { _isDirty = true; UpdateTitle(); }
-                }
-            }
-        }
-
-        if (cursorMoved)
-        {
-            _editor.RequestScrollToCursor();
         }
     }
+
+    private bool IsNavigationOnly(Key key) => 
+        key is Key.Up or Key.Down or Key.Left or Key.Right or Key.PageUp or Key.PageDown or Key.Home or Key.End;
 
     private void OnRender(double dt)
     {
@@ -347,6 +248,25 @@ public class WindowManager
         _statusBar.Render(canvas);
 
         _grContext.Flush();
+    }
+    
+    public void SetCurrentFile(string path, bool resetCursor = false)
+    {
+        _currentFilePath = path;
+        _isDirty = false;
+        _lastDirectory = Path.GetDirectoryName(path) ?? _lastDirectory;
+        
+        if (resetCursor)
+        {
+            _cursor.SetPosition(0, 0); 
+            _editor.ScrollY = 0;
+        }
+
+        string langName = _editor.UpdateSyntax(path);
+        _statusBar.LanguageName = langName;
+        _inputHandler.UpdateCurrentPath(path);
+    
+        UpdateTitle();
     }
 
     private void OnUpdate(double dt) => _editor.Update(dt);

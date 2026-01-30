@@ -12,11 +12,16 @@ public class EditorComponent : IComponent
     private readonly CursorManager _cursor;
     
     public float ScrollY { get; set; } = 0;
+    public float ScrollX { get; set; } = 0;
+    
     private float _lineHeight;
     private bool _needScrollToCursor;
     
     private EditorTheme _theme = EditorTheme.Dark;
     private List<(string pattern, SKColor color)> _currentRules = new();
+    
+    public int GetTotalLines() => _buffer.GetLines().Count();
+    public float LineHeight => _lineHeight;
     
     public void SetTheme(EditorTheme theme) 
     {
@@ -73,6 +78,13 @@ public class EditorComponent : IComponent
     }
 
     public CursorManager GetCursor() => _cursor;
+    
+    public float GetMaxHorizontalScroll()
+    {
+        var maxChars = _buffer.GetLines().Max(l => l.Length);
+        float totalWidth = maxChars * 10; 
+        return Math.Max(0, totalWidth - Bounds.Width + 100);
+    }
 
     public void Render(SKCanvas canvas)
 {
@@ -83,23 +95,42 @@ public class EditorComponent : IComponent
     
     var lines = _buffer.GetLines().ToList();
     
-    string maxLineStr = lines.Count.ToString();
-    float gutterPadding = 20;
-    float gutterWidth = _font.MeasureText(maxLineStr) + gutterPadding;
+    float gutterWidth = GetGutterWidth();
 
     canvas.Save();
     canvas.ClipRect(Bounds);
     
-    _sharedAuxPaint.Color = _theme.GutterBackground;
-    var gutterRect = new SKRect(Bounds.Left, Bounds.Top, Bounds.Left + gutterWidth, Bounds.Bottom);
-    canvas.DrawRect(gutterRect, _sharedAuxPaint);
-
+    // --- DESENHAR O GUTTER (ESTÁTICO NO EIXO X) ---
+    canvas.Save();
     canvas.Translate(0, -ScrollY);
+    
+    _sharedAuxPaint.Color = _theme.GutterBackground;
+    var gutterRect = new SKRect(Bounds.Left, Bounds.Top + ScrollY, Bounds.Left + gutterWidth, Bounds.Bottom + ScrollY);
+    canvas.DrawRect(gutterRect, _sharedAuxPaint);
     
     for (int i = 0; i < lines.Count; i++)
     {
         float yPos = Bounds.Top + (i * _lineHeight) - metrics.Ascent;
+        if (yPos - _lineHeight > Bounds.Bottom + ScrollY) break;
+        if (yPos + _lineHeight < Bounds.Top + ScrollY) continue;
 
+        string lineNum = (i + 1).ToString();
+        float lineNumX = Bounds.Left + (gutterWidth - _font.MeasureText(lineNum) - 10);
+        _gutterPaint.Color = _theme.GutterForeground; 
+        canvas.DrawText(lineNum, lineNumX, yPos, _font, _gutterPaint);
+    }
+    canvas.Restore();
+
+    // --- DESENHAR O CONTEÚDO (SCROLL X e Y) ---
+    canvas.Save();
+    canvas.Translate(-ScrollX, -ScrollY);
+    
+    var textClip = new SKRect(Bounds.Left + gutterWidth + ScrollX, Bounds.Top + ScrollY, Bounds.Right + ScrollX, Bounds.Bottom + ScrollY);
+    canvas.ClipRect(textClip);
+
+    for (int i = 0; i < lines.Count; i++)
+    {
+        float yPos = Bounds.Top + (i * _lineHeight) - metrics.Ascent;
         if (yPos - _lineHeight > Bounds.Bottom + ScrollY) break;
         if (yPos + _lineHeight < Bounds.Top + ScrollY) continue;
 
@@ -107,47 +138,27 @@ public class EditorComponent : IComponent
         if (i == _cursor.Line)
         {
             _sharedAuxPaint.Color = _theme.LineHighlight;
-            var lineRect = new SKRect(
-                Bounds.Left + gutterWidth, 
-                yPos + metrics.Ascent, 
-                Bounds.Right, 
-                yPos + metrics.Descent
-            );
+            var lineRect = new SKRect(Bounds.Left + gutterWidth + ScrollX, yPos + metrics.Ascent, Bounds.Right + ScrollX, yPos + metrics.Descent);
             canvas.DrawRect(lineRect, _sharedAuxPaint);
         }
 
-        // --- NÚMEROS DA LINHA ---
-        string lineNum = (i + 1).ToString();
-        float lineNumX = Bounds.Left + (gutterWidth - _font.MeasureText(lineNum) - 10);
-        _gutterPaint.Color = _theme.GutterForeground; 
-        canvas.DrawText(lineNum, lineNumX, yPos, _font, _gutterPaint);
-        
-        // --- SELEÇÃO ---
-        RenderSelection(canvas, i, yPos, gutterWidth, metrics);
-
-        // --- TEXTO (SINTAXE) ---
         float textX = Bounds.Left + gutterWidth + 10; 
+        RenderSelection(canvas, i, yPos, gutterWidth, metrics);
         RenderHighlightedLine(canvas, lines[i], textX, yPos);
 
-        // --- CURSOR ---
         if (i == _cursor.Line && _showCursor)
         {
             int safeCol = Math.Min(_cursor.Column, lines[i].Length);
             float cursorX = _font.MeasureText(lines[i].Substring(0, safeCol));
             
-            var cursorRect = new SKRect(
-                textX + cursorX,
-                yPos + metrics.Ascent,
-                textX + 2 + cursorX,
-                yPos + metrics.Descent
-            );
-            
+            var cursorRect = new SKRect(textX + cursorX, yPos + metrics.Ascent, textX + 2 + cursorX, yPos + metrics.Descent);
             _cursorPaint.Color = _theme.Cursor; 
             canvas.DrawRect(cursorRect, _cursorPaint);
         }
     }
     
-    canvas.Restore();
+    canvas.Restore(); 
+    canvas.Restore(); 
 }
     
     private record TextToken(string Text, SKColor Color);
@@ -199,16 +210,58 @@ public class EditorComponent : IComponent
     
     public void ScrollToCursor()
     {
+        // --- SCROLL VERTICAL (Y) ---
         float cursorYTop = _cursor.Line * _lineHeight;
         float cursorYBottom = (_cursor.Line + 1) * _lineHeight;
 
         if (cursorYBottom > ScrollY + Bounds.Height)
-        {
             ScrollY = cursorYBottom - Bounds.Height;
-        }
         else if (cursorYTop < ScrollY)
-        {
             ScrollY = cursorYTop;
+
+        // --- SCROLL HORIZONTAL (X) ---
+        var lines = _buffer.GetLines().ToList();
+        if (_cursor.Line < lines.Count)
+        {
+            string currentLineText = lines[_cursor.Line];
+            int safeCol = Math.Min(_cursor.Column, currentLineText.Length);
+        
+            // posição X do cursor em pixels
+            float cursorXPos = _font.MeasureText(currentLineText.Substring(0, safeCol));
+            float gutterWidth = GetGutterWidth();
+            float viewPortWidth = Bounds.Width - gutterWidth - 20; // Espaço útil do texto
+
+            // Se o cursor passou da borda direita
+            if (cursorXPos > ScrollX + viewPortWidth)
+            {
+                ScrollX = cursorXPos - viewPortWidth + 40; // +40 para dar uma folga
+            }
+            // Se o cursor voltou para a esquerda (atrás do scroll)
+            else if (cursorXPos < ScrollX)
+            {
+                ScrollX = Math.Max(0, cursorXPos - 20);
+            }
+        }
+    }
+    
+    public void ApplyScroll(float deltaX, float deltaY)
+    {
+        if (deltaX != 0)
+        {
+            ScrollX -= deltaX;
+            if (ScrollX < 0) ScrollX = 0;
+
+            float maxScrollX = GetMaxHorizontalScroll();
+            if (ScrollX > maxScrollX) ScrollX = maxScrollX;
+        }
+
+        if (deltaY != 0)
+        {
+            ScrollY -= deltaY;
+            if (ScrollY < 0) ScrollY = 0;
+
+            float maxScrollY = Math.Max(0, (GetTotalLines() * LineHeight) - (Bounds.Height / 2));
+            if (ScrollY > maxScrollY) ScrollY = maxScrollY;
         }
     }
     
@@ -250,36 +303,28 @@ public class EditorComponent : IComponent
         }
     }
     
+    private float GetGutterWidth()
+    {
+        var lines = _buffer.GetLines();
+        string maxLineStr = lines.Count().ToString();
+        float gutterPadding = 20;
+        return _font.MeasureText(maxLineStr) + gutterPadding;
+    }
+    
     public (int line, int col) GetTextPositionFromMouse(float mouseX, float mouseY)
     {
-        _font.GetFontMetrics(out var metrics);
-        float localY = mouseY - Bounds.Top + ScrollY;
-    
-        // Calcula a linha
-        int line = (int)(localY / _lineHeight);
-        line = Math.Clamp(line, 0, _buffer.LineCount - 1);
-    
-        // Calcula a largura do gutter (margem dos números)
-        string maxLineStr = _buffer.LineCount.ToString();
-        float gutterWidth = _font.MeasureText(maxLineStr) + 20;
-    
-        // Calcula a coluna
-        float relativeX = mouseX - (Bounds.Left + gutterWidth + 10);
-        if (relativeX <= 0) return (line, 0);
+        float relativeY = mouseY - Bounds.Top + ScrollY;
+        int line = (int)(relativeY / _lineHeight);
 
-        var lineText = _buffer.GetLines().ElementAt(line);
-        int col = 0;
-        float currentWidth = 0;
+        float textAreaLeft = Bounds.Left + GetGutterWidth(); 
+        float relativeX = (mouseX - textAreaLeft) + ScrollX; 
 
-        // Percorre os caracteres para ver qual está mais próximo do clique
-        for (int i = 0; i < lineText.Length; i++)
-        {
-            float charWidth = _font.MeasureText(lineText[i].ToString());
-            if (currentWidth + (charWidth / 2) > relativeX) break;
-        
-            currentWidth += charWidth;
-            col++;
-        }
+        float charWidth = _font.MeasureText(" "); 
+        int col = (int)Math.Max(0, Math.Round(relativeX / charWidth));
+
+        var lines = _buffer.GetLines().ToList();
+        line = Math.Clamp(line, 0, Math.Max(0, lines.Count - 1));
+        col = Math.Clamp(col, 0, lines[line].Length);
 
         return (line, col);
     }

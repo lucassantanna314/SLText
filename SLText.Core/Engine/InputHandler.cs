@@ -10,8 +10,11 @@ public class InputHandler
     private readonly TextBuffer _buffer;
     private readonly UndoManager _undoManager;
     private readonly Dictionary<(bool ctrl, bool shift, string key), ICommand> _shortcuts = new();
+    private SaveFileCommand _saveCommand;
     
     private TypingCommand? _currentTypingCommand;
+    
+    public event Action<float, float>? OnScrollRequested;
     
     private readonly Dictionary<char, char> _pairs = new()
     {
@@ -22,7 +25,7 @@ public class InputHandler
         { '\'', '\'' }
     };
     
-    public InputHandler(CursorManager cursor, TextBuffer buffer, UndoManager undoManager)
+    public InputHandler(CursorManager cursor, TextBuffer buffer, UndoManager undoManager, IDialogService dialogs, Action<string, bool> onFileAction)
     {
         _cursor = cursor;
         _buffer = buffer;
@@ -41,7 +44,9 @@ public class InputHandler
         _shortcuts.Add((true, false, "UpArrow"), new MoveFourLinesUpCommand(_cursor));
         _shortcuts.Add((true, false, "DownArrow"), new MoveFourLinesDownCommand(_cursor));
         
-        _shortcuts.Add((true, false, "S"), new SaveCommand());
+        _shortcuts.Add((true, false, "O"), new OpenFileCommand(dialogs, buffer, (path) => onFileAction(path, true)));
+        _saveCommand = new SaveFileCommand(dialogs, _buffer, (path) => onFileAction(path, false));
+        _shortcuts.Add((true, false, "S"), _saveCommand);
     }
     
     public void HandleTextInput(char c)
@@ -54,6 +59,12 @@ public class InputHandler
         }
     
         _cursor.Insert(c);
+
+        if (_pairs.TryGetValue(c, out char closingChar))
+        {
+            _cursor.Insert(closingChar);
+            _cursor.MoveLeft();
+        }
 
         if (char.IsWhiteSpace(c) || char.IsPunctuation(c))
         {
@@ -197,5 +208,22 @@ public class InputHandler
         try {
             ClipboardService.SetText(fullText);
         } catch {  }
+    }
+    
+    public void UpdateCurrentPath(string path)
+    {
+        _saveCommand.SetPath(path);
+    }
+    
+    public void HandleMouseScroll(float deltaY, bool ctrl)
+    {
+        if (ctrl)
+        {
+            OnScrollRequested?.Invoke(deltaY * 60, 0); 
+        }
+        else
+        {
+            OnScrollRequested?.Invoke(0, deltaY * 60);
+        }
     }
 }
