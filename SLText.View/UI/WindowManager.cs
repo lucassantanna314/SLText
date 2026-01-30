@@ -4,15 +4,16 @@ using SkiaSharp;
 using SLText.Core.Engine;
 using SLText.View.Components;
 using System.Runtime.InteropServices;
-using NativeFileDialogSharp;
 using Silk.NET.Core;
+using SLText.View.Components.Canvas;
+using SLText.View.Services;
 using SLText.View.Styles;
 using SLText.View.UI.Input;
 using TextCopy;
 
 namespace SLText.View.UI;
 
-public class WindowManager
+public class WindowManager : IDisposable
 {
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
@@ -30,16 +31,14 @@ public class WindowManager
     private CursorManager _cursor;
     private string? _currentFilePath;
     private bool _isDirty;
+    public bool IsDirty => _isDirty;
     private bool _isMouseDown;
+    private Action? _pendingAction;
     
     private EditorTheme _currentTheme = EditorTheme.Dark;
-    
-    private string _lastDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-    
-    private readonly SyntaxProvider _syntaxProvider = new(); 
-    private List<(string pattern, SKColor color)> _currentRules = new();
-    
+
     private MouseHandler _mouseHandler;
+    private ModalComponent _modal = new();
 
     private void ApplyTheme(EditorTheme theme)
     {
@@ -60,30 +59,11 @@ public class WindowManager
         _cursor = cursor;
         _inputHandler = input;
         
-        _inputHandler.OnScrollRequested += (deltaX, deltaY) => 
-{
-    if (deltaX != 0)
-    {
-        _editor.ScrollX -= deltaX;
-        if (_editor.ScrollX < 0) _editor.ScrollX = 0;
-        
-        float maxScrollX = _editor.GetMaxHorizontalScroll();
-        if (_editor.ScrollX > maxScrollX) _editor.ScrollX = maxScrollX;
-    }
-
-    if (deltaY != 0)
-    {
-        _editor.ScrollY -= deltaY;
-        if (_editor.ScrollY < 0) _editor.ScrollY = 0;
-
-        float maxScrollY = Math.Max(0, (_editor.GetTotalLines() * _editor.LineHeight) - (_editor.Bounds.Height / 2));
-        if (_editor.ScrollY > maxScrollY) _editor.ScrollY = maxScrollY;
-    }
-};
-        
         // 2. componentes visuais
         _editor = new EditorComponent(buffer, cursor);
-        _statusBar = new StatusBarComponent(cursor, buffer);
+        _inputHandler.AddEditorShortcuts(_editor);
+        
+        _statusBar = new StatusBarComponent(cursor, buffer, _editor);
         
         _currentFilePath = initialFilePath;
         
@@ -91,6 +71,11 @@ public class WindowManager
         _window.Render += OnRender;
         _window.Update += OnUpdate;
         _window.FramebufferResize += OnResize;
+        
+        if (input.GetDialogService() is NativeDialogService nativeDialog)
+        {
+            nativeDialog.Modal = _modal;
+        }
     }
     
     private void SetWindowIcon()
@@ -122,18 +107,21 @@ public class WindowManager
 
         // Configura Input da Silk.NET
         var input = _window.CreateInput();
+        
         foreach (var keyboard in input.Keyboards)
         {
             keyboard.KeyDown += OnKeyDown;
             
             keyboard.KeyChar += (k, c) => 
             {
+                if (_modal.IsVisible || _modal.IsRecentlyClosed) return;
+                
                 _inputHandler.HandleTextInput(c);
                 if (!_isDirty) { _isDirty = true; UpdateTitle(); }
             };
         }
         
-        _mouseHandler = new MouseHandler(_editor, _cursor, _inputHandler, input);
+        _mouseHandler = new MouseHandler(_editor, _cursor, _inputHandler, input, _modal);
         
         foreach (var mouse in input.Mice)
         {
@@ -154,6 +142,12 @@ public class WindowManager
         _inputHandler.OnScrollRequested += (deltaX, deltaY) => 
         {
             _editor.ApplyScroll(deltaX, deltaY);
+        };
+        
+        _inputHandler.OnZoomRequested += (delta) => 
+        {
+            _editor.FontSize += delta;
+            _editor.RequestScrollToCursor(); 
         };
         
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -202,11 +196,16 @@ public class WindowManager
 
     private void OnKeyDown(IKeyboard k, Key key, int arg3)
     {
-        bool ctrl = k.IsKeyPressed(Key.ControlLeft) || k.IsKeyPressed(Key.ControlRight);
-        bool shift = k.IsKeyPressed(Key.ShiftLeft) || k.IsKeyPressed(Key.ShiftRight);
-    
         string? mappedKey = KeyboardMapper.Normalize(key);
         if (mappedKey == null) return;
+
+        if (_modal.IsVisible)
+        {
+            if (_modal.HandleKeyDown(mappedKey)) return;
+        }
+        
+        bool ctrl = k.IsKeyPressed(Key.ControlLeft) || k.IsKeyPressed(Key.ControlRight);
+        bool shift = k.IsKeyPressed(Key.ShiftLeft) || k.IsKeyPressed(Key.ShiftRight);
 
         if (ctrl && key == Key.C) { _inputHandler.HandleCopy(); return; }
         if (ctrl && key == Key.V) 
@@ -254,6 +253,11 @@ public class WindowManager
         
         _statusBar.FileInfo = string.IsNullOrEmpty(_currentFilePath) ? "New File" : Path.GetFileName(_currentFilePath);
         _statusBar.Render(canvas);
+        
+        if (_modal.IsVisible)
+        {
+            _modal.Render(canvas, new SKRect(0, 0, width, height), _currentTheme);
+        }
 
         _grContext.Flush();
     }
@@ -278,13 +282,30 @@ public class WindowManager
         UpdateTitle();
     }
 
-    private void OnUpdate(double dt) => _editor.Update(dt);
+    private void OnUpdate(double dt)
+    {
+        _editor.Update(dt);
+
+        if (_pendingAction != null)
+        {
+            var action = _pendingAction;
+            _pendingAction = null; 
+            action();
+        }
+    }
     private void OnResize(Silk.NET.Maths.Vector2D<int> size) => SetupSurface();
 
     private void SetupSurface()
     {
         var target = new GRBackendRenderTarget(_window.Size.X, _window.Size.Y, 0, 8, new GRGlFramebufferInfo(0, 0x8058));
         _surface = SKSurface.Create(_grContext, target, GRSurfaceOrigin.BottomLeft, SKColorType.Rgba8888);
+    }
+    
+    public void Dispose()
+    {
+        _surface?.Dispose();
+        _grContext?.Dispose();
+        _window?.Dispose();
     }
 
     public void Run() => _window.Run();

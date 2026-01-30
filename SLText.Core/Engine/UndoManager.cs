@@ -58,4 +58,10 @@ public class UndoManager
         if (_history.Count > MaxHistory) _history.RemoveFirst();
         _redoStack.Clear();
     }
+    
+    public void Clear()
+    {
+        _history.Clear();
+        _redoStack.Clear();
+    }
 }

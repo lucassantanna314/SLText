@@ -156,6 +156,13 @@ public class CursorManager
         _desiredColumn = Column;
     }
     
+    public void UpdateSelectionRange(int newAnchorLine, int newCursorLine)
+    {
+        SelectionAnchorLine = newAnchorLine;
+        Line = newCursorLine;
+        _desiredColumn = Column; 
+    }
+    
     
     public void Backspace()
     {
