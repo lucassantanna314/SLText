@@ -11,6 +11,7 @@ public class InputHandler
     private readonly UndoManager _undoManager;
     private readonly Dictionary<(bool ctrl, bool shift, string key), ICommand> _shortcuts = new();
     private SaveFileCommand _saveCommand;
+    private string _lastDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     
     private TypingCommand? _currentTypingCommand;
     
@@ -44,10 +45,8 @@ public class InputHandler
         _shortcuts.Add((true, false, "UpArrow"), new MoveFourLinesUpCommand(_cursor));
         _shortcuts.Add((true, false, "DownArrow"), new MoveFourLinesDownCommand(_cursor));
         
-        _shortcuts.Add((true, false, "O"), new OpenFileCommand(dialogs, buffer, (path) => onFileAction(path, true)));
-        _saveCommand = new SaveFileCommand(dialogs, _buffer, (path) => onFileAction(path, false));
-        _shortcuts.Add((true, false, "S"), _saveCommand);
-    }
+        _shortcuts.Add((true, false, "O"), new OpenFileCommand(dialogs, buffer, (path) => onFileAction(path, true), () => _lastDirectory));
+        _saveCommand = new SaveFileCommand(dialogs, _buffer, (path) => onFileAction(path, false), () => _lastDirectory);    }
     
     public void HandleTextInput(char c)
     {
@@ -215,15 +214,24 @@ public class InputHandler
         _saveCommand.SetPath(path);
     }
     
-    public void HandleMouseScroll(float deltaY, bool ctrl)
+    public void HandleMouseScroll(float deltaY, bool ctrl, bool shift)
     {
-        if (ctrl)
+        float scrollSpeed = 60f;
+
+        if (shift)
         {
-            OnScrollRequested?.Invoke(deltaY * 60, 0); 
+            OnScrollRequested?.Invoke(deltaY * scrollSpeed, 0); 
         }
+        
         else
         {
-            OnScrollRequested?.Invoke(0, deltaY * 60);
+            OnScrollRequested?.Invoke(0, deltaY * scrollSpeed);
         }
+    }
+    
+    public void UpdateLastDirectory(string path)
+    {
+        if (!string.IsNullOrEmpty(path))
+            _lastDirectory = Path.GetDirectoryName(path) ?? _lastDirectory;
     }
 }

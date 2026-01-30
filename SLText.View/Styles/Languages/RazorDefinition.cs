@@ -19,7 +19,9 @@ public class RazorDefinition : LanguageDefinition
         };
 
         rules.AddRange(SharedRules.GetCssRules());
-
+        
+        rules.AddRange(SharedRules.GetJsRules());
+        
         return rules;
     }
 }

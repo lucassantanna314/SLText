@@ -73,8 +73,10 @@ public class MouseHandler
     public void OnMouseScroll(IMouse mouse, ScrollWheel scroll)
     {
         var keyboard = _inputContext.Keyboards[0];
+    
         bool ctrl = keyboard.IsKeyPressed(Key.ControlLeft) || keyboard.IsKeyPressed(Key.ControlRight);
+        bool shift = keyboard.IsKeyPressed(Key.ShiftLeft) || keyboard.IsKeyPressed(Key.ShiftRight);
 
-        _inputHandler.HandleMouseScroll(scroll.Y, ctrl);
+        _inputHandler.HandleMouseScroll(scroll.Y, ctrl, shift);
     }
 }

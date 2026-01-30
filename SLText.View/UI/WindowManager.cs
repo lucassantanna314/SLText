@@ -143,6 +143,14 @@ public class WindowManager
             mouse.Scroll += _mouseHandler.OnMouseScroll;
         }
         
+        _window.FocusChanged += (isFocused) => 
+        {
+            if (isFocused)
+            {
+                _inputHandler.ResetTypingState();
+            }
+        };
+        
         _inputHandler.OnScrollRequested += (deltaX, deltaY) => 
         {
             _editor.ApplyScroll(deltaX, deltaY);
@@ -254,7 +262,8 @@ public class WindowManager
     {
         _currentFilePath = path;
         _isDirty = false;
-        _lastDirectory = Path.GetDirectoryName(path) ?? _lastDirectory;
+        
+        _inputHandler.UpdateLastDirectory(path);
         
         if (resetCursor)
         {

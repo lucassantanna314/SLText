@@ -9,13 +9,14 @@ public class SaveFileCommand : ICommand
     private readonly TextBuffer _buffer;
     private readonly Action<string> _onSuccess;
     private string? _currentPath;
+    private readonly Func<string> _getLastDirectory;
 
-    public SaveFileCommand(IDialogService dialogService, TextBuffer buffer, Action<string> onSuccess, string? currentPath = null)
+    public SaveFileCommand(IDialogService dialogs, TextBuffer buffer, Action<string> onSuccess, Func<string> getLastDir)
     {
-        _dialogService = dialogService;
+        _dialogService = dialogs;
         _buffer = buffer;
         _onSuccess = onSuccess;
-        _currentPath = currentPath;
+        _getLastDirectory = getLastDir;
     }
     
     public void SetPath(string path)
@@ -29,8 +30,8 @@ public class SaveFileCommand : ICommand
 
         if (string.IsNullOrEmpty(path))
         {
-            string filter = "txt,cs,html,htm,css,js,razor,cshtml,xml,csproj,gcode,nc,cnc,tap";
-            path = _dialogService.SaveFile(filter, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+            string filter = "txt,cs,html,htm,css,js,razor,rhex,json";
+            path = _dialogService.SaveFile(filter, _getLastDirectory());
         }
 
         if (path != null)

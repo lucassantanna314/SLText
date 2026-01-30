@@ -5,7 +5,7 @@ namespace SLText.View.Styles.Languages;
 public class JsonDefinition : LanguageDefinition
 {
     public override string Name => "JSON";
-    public override string[] Extensions => new[] { ".json" };
+    public override string[] Extensions => new[] { ".json", ".rhex" };
     public override List<(string Pattern, Func<EditorTheme, SKColor> ColorSelector)> GetRules() => new()
     {
         ( "\".*?\"(?=\\s*:)", theme => theme.Type ),    
