@@ -116,6 +116,9 @@ public class WindowManager : IDisposable
             {
                 if (_modal.IsVisible || _modal.IsRecentlyClosed) return;
                 
+                bool ctrl = k.IsKeyPressed(Key.ControlLeft) || k.IsKeyPressed(Key.ControlRight);
+                if (ctrl) return;
+                
                 _inputHandler.HandleTextInput(c);
                 if (!_isDirty) { _isDirty = true; UpdateTitle(); }
             };
@@ -165,19 +168,23 @@ public class WindowManager : IDisposable
         {
             try 
             {
-                string content = File.ReadAllText(_currentFilePath);
+                string content = File.ReadAllText(_currentFilePath).Replace("\t", "    ");
                 _buffer.LoadText(content);
+                _cursor.SetPosition(0, 0);
+                _inputHandler.ResetTypingState();
                 _statusBar.LanguageName = _editor.UpdateSyntax(_currentFilePath);
                 UpdateTitle(); 
             }
             catch (Exception ex)
             {
                 _currentFilePath = null;
+                _cursor.SetPosition(0, 0);
             }
         }
         else 
         {
-            UpdateTitle(); 
+            _cursor.SetPosition(0, 0);
+            UpdateTitle();
         }
         
         ApplyTheme(EditorTheme.Dark);

@@ -14,11 +14,17 @@ public class UndoManager
     public void ExecuteCommand(ICommand command)
     {
         command.Execute();
-        AddtoHistory(command);
+        AddToHistory(command);
         _redoStack.Clear();
     }
     
-    private void AddtoHistory(ICommand command)
+    public void AddExternalCommand(ICommand command)
+    {
+        AddToHistory(command);
+        _redoStack.Clear();
+    }
+    
+    private void AddToHistory(ICommand command)
     {
         _history.AddLast(command);
         if (_history.Count > MaxHistory)
@@ -33,7 +39,7 @@ public class UndoManager
 
         var command = _history.Last.Value;
         _history.RemoveLast();
-        
+
         command.Undo();
         _redoStack.Push(command);
     }
@@ -43,20 +49,14 @@ public class UndoManager
         if (_redoStack.Count == 0) return;
 
         var command = _redoStack.Pop();
-        command.Execute();
-        
+        command.Execute(); 
+
         _history.AddLast(command);
+        
         if (_history.Count > MaxHistory)
         {
             _history.RemoveFirst();
         }
-    }
-    
-    public void AddExternalCommand(ICommand command)
-    {
-        _history.AddLast(command);
-        if (_history.Count > MaxHistory) _history.RemoveFirst();
-        _redoStack.Clear();
     }
     
     public void Clear()

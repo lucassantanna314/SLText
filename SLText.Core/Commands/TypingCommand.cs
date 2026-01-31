@@ -7,8 +7,10 @@ public class TypingCommand : ICommand
 {
     private readonly TextBuffer _buffer;
     private readonly CursorManager _cursor;
-    private TextMemento _beforeState; 
+    private readonly TextMemento _beforeState; 
     private TextMemento? _afterState;
+    
+    
     public TypingCommand(TextBuffer buffer, CursorManager cursor)
     {
         _buffer = buffer;
@@ -32,5 +34,6 @@ public class TypingCommand : ICommand
     public void Undo()
     {
         _buffer.RestoreSnapshot(_beforeState);
-        _cursor.SetPosition(_beforeState.CursorLine, _beforeState.CursorColumn);    }
+        _cursor.SetPosition(_beforeState.CursorLine, _beforeState.CursorColumn);    
+    }
 }

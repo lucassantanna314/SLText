@@ -8,7 +8,7 @@ public class MoveLineCommand : ICommand
     private readonly TextBuffer _buffer;
     private readonly CursorManager _cursor;
     private readonly int _direction; 
-    private bool _wasSelectionActive;
+    private TextMemento? _snapshot; 
 
     public MoveLineCommand(TextBuffer buffer, CursorManager cursor, int direction)
     {
@@ -19,16 +19,27 @@ public class MoveLineCommand : ICommand
 
     public void Execute()
     {
-        var range = _cursor.GetSelectionRange();
+        // Se é a primeira vez (Execute normal), tiramos o snapshot para o Undo
+        if (_snapshot == null) 
+        {
+            _snapshot = _buffer.TakeSnapshot(_cursor.Line, _cursor.Column);
+        }
+        
+        ApplyMoveLogic();
+    }
 
-        if (range == null)
+    private void ApplyMoveLogic()
+    {
+        var range = _cursor.GetSelectionRange();
+        
+        if (range == null) 
         {
             MoveSingleLine(_cursor.Line, _direction);
         }
-        else
+        else 
         {
             var (startL, startC, endL, endC) = range.Value;
-
+            
             if (_direction == -1 && startL <= 0) return;
             if (_direction == 1 && endL >= _buffer.LineCount - 1) return;
 
@@ -45,30 +56,31 @@ public class MoveLineCommand : ICommand
                 _buffer.InsertLine(startL, lineBelowText);
             }
 
-            bool anchorIsAtTop = _cursor.SelectionAnchorLine < _cursor.Line;
-            
-            if (anchorIsAtTop)
-                _cursor.UpdateSelectionRange(startL + _direction, endL + _direction);
-            else
-                _cursor.UpdateSelectionRange(endL + _direction, startL + _direction);
+            _cursor.UpdateSelectionRange(startL + _direction, endL + _direction);
             
             _cursor.SetPosition(_cursor.Line, _cursor.Column);
         }
     }
-    
+
     private void MoveSingleLine(int line, int dir)
     {
         int target = line + dir;
+        
         if (target < 0 || target >= _buffer.LineCount) return;
 
         var content = _buffer.GetLines().ElementAt(line);
         _buffer.RemoveLine(line);
         _buffer.InsertLine(target, content);
+        
         _cursor.SetPosition(target, _cursor.Column);
     }
 
     public void Undo()
     {
-        new MoveLineCommand(_buffer, _cursor, -_direction).Execute();
+        if (_snapshot != null)
+        {
+            _buffer.RestoreSnapshot(_snapshot);
+            _cursor.SetPosition(_snapshot.CursorLine, _snapshot.CursorColumn);
+        }
     }
 }

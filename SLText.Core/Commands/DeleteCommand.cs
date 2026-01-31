@@ -3,13 +3,13 @@ using SLText.Core.Interfaces;
 
 namespace SLText.Core.Commands;
 
-public class DuplicateLineCommand : ICommand
+public class DeleteCommand : ICommand
 {
     private readonly TextBuffer _buffer;
     private readonly CursorManager _cursor;
     private TextMemento? _snapshot;
 
-    public DuplicateLineCommand(TextBuffer buffer, CursorManager cursor)
+    public DeleteCommand(TextBuffer buffer, CursorManager cursor)
     {
         _buffer = buffer;
         _cursor = cursor;
@@ -18,15 +18,7 @@ public class DuplicateLineCommand : ICommand
     public void Execute()
     {
         _snapshot = _buffer.TakeSnapshot(_cursor.Line, _cursor.Column);
-        
-        int line = _cursor.Line;
-        var currentLineText = _buffer.GetLines().ElementAtOrDefault(line);
-    
-        if (currentLineText != null)
-        {
-            _buffer.InsertLine(line + 1, currentLineText);
-            _cursor.SetPosition(line + 1, _cursor.Column);
-        }
+        _buffer.Delete(_cursor.Line, _cursor.Column);
     }
 
     public void Undo()
