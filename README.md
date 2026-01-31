@@ -79,25 +79,69 @@ O SLText conta com um sistema de Snippets inteligentes que permitem expandir abr
     
     após a expansão, permitindo continuar a escrita sem interrupções.
 
-⌨️ Atalhos de Teclado
+⌨️ Atalhos de Teclado - SLText
+
+📄 Gestão de Arquivos
 
 Atalho	Ação
 
-Ctrl + N	Novo Arquivo
+Ctrl + N	Criar um Novo Arquivo (limpa o buffer e reseta o desfazer).
 
-Ctrl + O	Abrir Arquivo
+Ctrl + O	Abrir um arquivo existente do disco.
 
-Ctrl + S	Guardar Alterações
+Ctrl + S	Salvar as alterações no arquivo atual.
 
-Ctrl + C / Ctrl + V	Copiar / Colar
+✏️ Edição e Seleção
 
-Ctrl + Z / Ctrl + Y	Desfazer / Refazer
+Atalho	Ação
 
-Atalho Movimentação
+Ctrl + C	Copiar o texto selecionado para a área de transferência.
 
-Ctrl + Setas Pula Palavras ou Linhas
+Ctrl + V	Colar o texto da área de transferência na posição do cursor.
 
-SHIFT + Setas Seleciona
+Ctrl + X	Recortar o texto selecionado.
+
+Ctrl + A	Selecionar Tudo o que há no documento.
+
+Ctrl + D	Duplicar a linha atual (ou a seleção).
+
+Ctrl + Z	Desfazer a última ação.
+
+Ctrl + Y	Refazer a última ação desfeita.
+
+Shift + Setas	Selecionar texto caractere por caractere ou linha por linha.
+
+Ctrl + L	Selecionar Linha atual por completo.
+
+Ctrl + Shift + K	Deletar Linha atual completamente.
+
+🚀 Movimentação e Navegação
+
+Atalho	Ação
+
+Ctrl + ← / →	Pular uma palavra inteira para a esquerda ou direita.
+
+Ctrl + ↑ / ↓	Mover a visualização em bloco (4 linhas por vez).
+
+Ctrl + Shift + ↑ / ↓	Mover a Linha atual para cima ou para baixo (troca de posição).
+
+🔍 Visualização (Zoom)
+
+Atalho	Ação
+
+Ctrl + Mouse Scroll	Aumentar ou diminuir o Zoom (tamanho da fonte).
+
+Ctrl + 0 (Zero)	Resetar Zoom para o padrão (16pt).
+
+💡 Dicas de Uso
+
+    Seleção de Bloco: Você pode combinar Ctrl + Shift + Setas Laterais para selecionar palavras inteiras rapidamente.
+
+    Auto-Parênteses: Ao digitar (, [, {, " ou ', o editor insere automaticamente o par de fechamento para você.
+
+    Barra de Status: Acompanhe o tamanho atual da fonte (zoom) e a posição exata do cursor no canto inferior direito.
+
+
 
 🤝 Como Contribuir
 

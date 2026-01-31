@@ -19,11 +19,13 @@ public class StatusBarComponent : IComponent
     
     public string LanguageName { get; set; } = "Plain Text";
     public string FileInfo { get; set; } = "New File";
+    private readonly EditorComponent _editor;
 
-    public StatusBarComponent(CursorManager cursor, TextBuffer buffer)
+    public StatusBarComponent(CursorManager cursor, TextBuffer buffer, EditorComponent editor)
     {
         _cursor = cursor;
         _buffer = buffer;
+        _editor = editor;
         
         string fontPath = Path.Combine(AppContext.BaseDirectory, "Assets", "JetBrainsMono-Regular.ttf");
         SKTypeface typeface;
@@ -56,7 +58,7 @@ public class StatusBarComponent : IComponent
         float textY = Bounds.MidY - (metrics.Ascent + metrics.Descent) / 2;
 
         // --- LADO ESQUERDO: Contagem de Linhas e LINGUAGEM ---
-        string leftText = $"{_buffer.LineCount} linhas  |  {LanguageName}";
+        string leftText = $"{_buffer.LineCount} Linhas  |  {LanguageName}  | Font: {_editor.FontSize:0}pt";
         canvas.DrawText(leftText, Bounds.Left + 15, textY, _font, _textPaint);
 
         // --- CENTRO: Nome do Arquivo ---

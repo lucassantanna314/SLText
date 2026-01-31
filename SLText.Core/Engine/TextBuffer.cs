@@ -25,6 +25,23 @@ public class TextBuffer
         _lines[line].InsertRange(column, text.ToCharArray());
     }
     
+    public void InsertLine(int index, string text)
+    {
+        _lines.Insert(index, text.ToList());
+    }
+    
+    public void RemoveLine(int index)
+    {
+        if (index >= 0 && index < _lines.Count && _lines.Count > 1)
+        {
+            _lines.RemoveAt(index);
+        }
+        else if (_lines.Count == 1)
+        {
+            _lines[0].Clear();
+        }
+    }
+    
     //actions
     
     public void RemoveRange(int startLine, int startCol, int endLine, int endCol)

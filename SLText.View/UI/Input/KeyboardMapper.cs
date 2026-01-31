@@ -13,6 +13,12 @@ public static class KeyboardMapper
         Key.Enter     => "Enter",
         Key.Backspace => "Backspace",
         Key.Delete    => "Delete",
+        
+        Key.Number0       => "0",
+        Key.Keypad0       => "0",
+        
+        Key.Number1       => "1",
+        Key.Keypad1       => "1",
         _         => key.ToString()
     };
     

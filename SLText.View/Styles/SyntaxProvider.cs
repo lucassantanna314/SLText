@@ -17,6 +17,7 @@ public class SyntaxProvider
             new JsDefinition(),
             new RazorDefinition(),
             new XmlDefinition(),
+            new JsonDefinition(),
             new GCodeDefinition()
         };
     }
