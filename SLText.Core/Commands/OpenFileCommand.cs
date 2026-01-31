@@ -11,6 +11,7 @@ public class OpenFileCommand : ICommand
     private readonly Func<string> _getLastDirectory;
     private readonly SaveFileCommand _saveCommand;
     private readonly Func<bool> _isDirtyCheck;
+    private readonly UndoManager _undoManager;
 
     public OpenFileCommand(
         IDialogService dialogService, 
@@ -18,7 +19,8 @@ public class OpenFileCommand : ICommand
         Action<string> onSuccess, 
         Func<string> getLastDirectory,
         SaveFileCommand saveCommand,
-        Func<bool> isDirtyCheck)
+        Func<bool> isDirtyCheck,
+        UndoManager undoManager)
     {
         _dialogService = dialogService;
         _buffer = buffer;
@@ -26,6 +28,7 @@ public class OpenFileCommand : ICommand
         _getLastDirectory = getLastDirectory;
         _saveCommand = saveCommand;
         _isDirtyCheck = isDirtyCheck;
+        _undoManager = undoManager;
     }
 
     public void Execute()
@@ -62,6 +65,7 @@ public class OpenFileCommand : ICommand
         {
             string content = File.ReadAllText(path).Replace("\t", "    ");
             _buffer.LoadText(content);
+            _undoManager.Clear();
             _onSuccess?.Invoke(path); 
         }
     }

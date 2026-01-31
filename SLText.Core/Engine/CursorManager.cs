@@ -4,9 +4,12 @@ public class CursorManager
 {
     private readonly TextBuffer _buffer;
     
+    public int Line { get; private set; }
+    public int Column { get; private set; }
+    private int _desiredColumn = 0; 
+
     public int? SelectionAnchorLine { get; private set; }
     public int? SelectionAnchorColumn { get; private set; }
-    
     public bool HasSelection => SelectionAnchorLine.HasValue;
 
     public CursorManager(TextBuffer buffer)
@@ -14,38 +17,6 @@ public class CursorManager
         _buffer = buffer;
     }
 
-    public int Line { get; private set; }
-    public int Column { get; private set; }
-    private int _desiredColumn = 0;
-    
-    //selection
-    public void StartSelection()
-    {
-        if (!HasSelection)
-        {
-            SelectionAnchorLine = Line;
-            SelectionAnchorColumn = Column;
-        }
-    }
-    
-    public void ClearSelection()
-    {
-        SelectionAnchorLine = null;
-        SelectionAnchorColumn = null;
-    }
-    
-    public (int startLine, int startCol, int endLine, int endCol)? GetSelectionRange()
-    {
-        if (!HasSelection) return null;
-
-        var start = (l: SelectionAnchorLine.Value, c: SelectionAnchorColumn.Value);
-        var end = (l: Line, c: Column);
-
-        if (start.l < end.l || (start.l == end.l && start.c < end.c))
-            return (start.l, start.c, end.l, end.c);
-        
-        return (end.l, end.c, start.l, start.c);
-    }
 
     public void MoveUp()
     {
@@ -87,72 +58,46 @@ public class CursorManager
         _desiredColumn = Column;
     }
 
+    public void SetPosition(int line, int column)
+    {
+        Line = Math.Clamp(line, 0, _buffer.LineCount - 1);
+        Column = Math.Clamp(column, 0, _buffer.GetLineLength(Line));
+        _desiredColumn = Column;
+    }
+
+    private void UpdateColumnToDesired()
+    {
+        Column = Math.Min(_desiredColumn, _buffer.GetLineLength(Line));
+    }
+
     public void Insert(char c)
     {
-        _buffer.Insert(c, Line, Column);
+        _buffer.Insert(Line, Column, c);
         Column++;
         _desiredColumn = Column;
     }
 
-    public void Enter()
+    public void StartSelection()
     {
-        var lines = _buffer.GetLines().ToList();
-        string currentLineText = lines[Line];
-        int safeColumn = Math.Clamp(Column, 0, currentLineText.Length);
-
-        string baseIndentation = "";
-        foreach (char c in currentLineText)
+        if (!HasSelection)
         {
-            if (c == ' ' || c == '\t') baseIndentation += c;
-            else break;
+            SelectionAnchorLine = Line;
+            SelectionAnchorColumn = Column;
         }
-
-        bool isBetweenBraces = safeColumn > 0 && safeColumn < currentLineText.Length &&
-                               currentLineText[safeColumn - 1] == '{' && 
-                               currentLineText[safeColumn] == '}';
-
-        if (isBetweenBraces)
-        {
-            _buffer.Delete(Line, safeColumn); 
-
-            _buffer.BreakLine(Line, safeColumn);
-            Line++;
-
-            string midIndentation = baseIndentation + "    ";
-            _buffer.Insert(Line, 0, midIndentation);
-
-            _buffer.BreakLine(Line, midIndentation.Length);
-            _buffer.Insert(Line + 1, 0, baseIndentation + "}");
-
-            Column = midIndentation.Length;
-        }
-        else
-        {
-            _buffer.BreakLine(Line, safeColumn);
-            Line++;
-        
-            if (!string.IsNullOrEmpty(baseIndentation))
-            {
-                _buffer.Insert(Line, 0, baseIndentation);
-                Column = baseIndentation.Length;
-            }
-            else
-            {
-                Column = 0;
-            }
-        }
-
-        _desiredColumn = Column;
+    }
+    
+    public void ClearSelection()
+    {
+        SelectionAnchorLine = null;
+        SelectionAnchorColumn = null;
     }
     
     public void SelectAll()
     {
         SelectionAnchorLine = 0;
         SelectionAnchorColumn = 0;
-
         Line = _buffer.LineCount - 1;
         Column = _buffer.GetLineLength(Line);
-    
         _desiredColumn = Column;
     }
     
@@ -163,39 +108,16 @@ public class CursorManager
         _desiredColumn = Column; 
     }
     
-    
-    public void Backspace()
+    public (int startLine, int startCol, int endLine, int endCol)? GetSelectionRange()
     {
-        if (Column > 0)
-        {
-            _buffer.Backspace(Line, Column);
-            Column--;
-        }
-        else if (Line > 0)
-        {
-            int targetColumn = _buffer.GetLineLength(Line - 1);
-            _buffer.Backspace(Line,Column);
-            Line--;
-            Column = targetColumn;
-        }
-        
-        _desiredColumn = Column;
-    }
+        if (!HasSelection) return null;
 
-    public void Delete()
-    {
-        _buffer.Delete(Line, Column);
-    }
-    
-    public void SetPosition(int line, int column)
-    {
-        Line = Math.Clamp(line, 0, _buffer.LineCount - 1);
-        Column = Math.Clamp(column, 0, _buffer.GetLineLength(Line));
-        _desiredColumn = Column;
-    }
-    
-    private void UpdateColumnToDesired()
-    {
-        Column = Math.Min(_desiredColumn, _buffer.GetLineLength(Line));
+        var start = (l: SelectionAnchorLine.Value, c: SelectionAnchorColumn.Value);
+        var end = (l: Line, c: Column);
+
+        if (start.l < end.l || (start.l == end.l && start.c < end.c))
+            return (start.l, start.c, end.l, end.c);
+        
+        return (end.l, end.c, start.l, start.c);
     }
 }
