@@ -1,4 +1,5 @@
 using SLText.Core.Engine;
+using SLText.Core.Engine.Strategies;
 using SLText.Core.Interfaces;
 
 namespace SLText.Core.Commands;
@@ -7,12 +8,14 @@ public class EnterCommand : ICommand
 {
     private readonly TextBuffer _buffer;
     private readonly CursorManager _cursor;
+    private readonly string? _filePath;
     private TextMemento _snapshot;
 
-    public EnterCommand(TextBuffer buffer, CursorManager cursor)
+    public EnterCommand(TextBuffer buffer, CursorManager cursor, string? filePath)
     {
         _buffer = buffer;
         _cursor = cursor;
+        _filePath = filePath;
     }
 
     public void Execute()
@@ -23,62 +26,51 @@ public class EnterCommand : ICommand
         int col = _cursor.Column;
         
         var lines = _buffer.GetLines().ToList();
-        
         if (line >= lines.Count) return;
 
         string currentLineText = lines[line];
-        int safeColumn = Math.Clamp(col, 0, currentLineText.Length);
-
-        // Calcula indentação base
-        string baseIndentation = "";
-        foreach (char c in currentLineText)
+        
+        string extension = System.IO.Path.GetExtension(_filePath ?? "");
+        var strategy = IndentationProvider.GetStrategy(extension);
+        
+        string baseIndent = strategy.GetIndentation(currentLineText, col);
+        
+        if (strategy.ShouldExpandBraces(currentLineText, col))
         {
-            if (c == ' ' || c == '\t') baseIndentation += c;
-            else break;
-        }
-
-        // Verifica cenário: enter entre chaves {|}
-        bool isBetweenBraces = safeColumn > 0 && safeColumn < currentLineText.Length &&
-                               currentLineText[safeColumn - 1] == '{' && 
-                               currentLineText[safeColumn] == '}';
-
-        if (isBetweenBraces)
-        {
-            // Remove o '}' da posição atual para movê-lo para baixo depois
-            _buffer.Delete(line, safeColumn); 
-
-            // Quebra a linha após o '{'
-            _buffer.BreakLine(line, safeColumn);
-            line++; // Simula o movimento para a próxima linha
-
-            // Insere a linha do meio com indentação extra
-            string midIndentation = baseIndentation + "    ";
-            _buffer.Insert(line, 0, midIndentation);
-
-            // Quebra novamente para jogar o '}' para a linha de baixo
-            _buffer.BreakLine(line, midIndentation.Length);
-            
-            // Insere o '}' na indentação correta
-            _buffer.Insert(line + 1, 0, baseIndentation + "}");
-
-            // Posiciona o cursor na linha do meio, no fim da indentação
-            _cursor.SetPosition(line, midIndentation.Length);
+            ExecuteExpansion(line, col, baseIndent);
         }
         else
         {
-            // Cenário padrão: Quebra linha e mantêm indentação
-            _buffer.BreakLine(line, safeColumn);
-            line++;
+            ExecuteStandardNewline(line, col, baseIndent);
+        }
+    }
+
+    private void ExecuteExpansion(int line, int col, string baseIndent)
+    {
+        _buffer.BreakLine(line, col);
+    
+        line++; 
+        string midIndent = baseIndent + "    ";
+        _buffer.InsertLine(line, midIndent); 
         
-            if (!string.IsNullOrEmpty(baseIndentation))
-            {
-                _buffer.Insert(line, 0, baseIndentation);
-                _cursor.SetPosition(line, baseIndentation.Length);
-            }
-            else
-            {
-                _cursor.SetPosition(line, 0);
-            }
+        _cursor.SetPosition(line, midIndent.Length);
+    
+        _buffer.Insert(line + 1, 0, baseIndent);
+    }
+    
+    private void ExecuteStandardNewline(int line, int col, string baseIndent)
+    {
+        _buffer.BreakLine(line, col);
+        line++;
+        
+        if (!string.IsNullOrEmpty(baseIndent))
+        {
+            _buffer.Insert(line, 0, baseIndent);
+            _cursor.SetPosition(line, baseIndent.Length);
+        }
+        else
+        {
+            _cursor.SetPosition(line, 0);
         }
     }
 

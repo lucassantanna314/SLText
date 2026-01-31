@@ -17,6 +17,7 @@ public class InputHandler
     private string _lastDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     private readonly IDialogService _dialogs;
     private TypingCommand? _currentTypingCommand;
+    private string? _currentFilePath;
     
     public event Action<float, float>? OnScrollRequested;
     public event Action<float>? OnZoomRequested;
@@ -63,8 +64,7 @@ public class InputHandler
 
         // --- COMANDOS COM HISTÓRICO (Factories para Estabilidade do Undo) ---
         _undoableShortcuts.Add((false, false, "Tab"), () => new InsertTabCommand(_buffer, _cursor));
-        _undoableShortcuts.Add((false, false, "Enter"), () => new EnterCommand(_buffer, _cursor));
-        
+        _undoableShortcuts.Add((false, false, "Enter"), () => new EnterCommand(_buffer, _cursor, _currentFilePath));        
         // Deletação
         _undoableShortcuts.Add((false, false, "Backspace"), () => new BackspaceCommand(_buffer, _cursor));
         _undoableShortcuts.Add((false, false, "Delete"), () => new DeleteCommand(_buffer, _cursor));
@@ -229,6 +229,7 @@ public class InputHandler
     
     public void UpdateCurrentPath(string path)
     {
+        _currentFilePath = path;
         _saveCommand.SetPath(path);
     }
     

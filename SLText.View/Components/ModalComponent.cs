@@ -128,14 +128,17 @@ public class ModalComponent
     {
         if (!IsVisible) return false;
 
-        if (key == "S" || key == "Enter" || key == "N" || key == "Escape") 
+        if (key == "S" || key == "Enter") 
         {
-            IsVisible = false;
-            _lastClosedTime = DateTime.Now; 
-
-            if (key == "S" || key == "Enter") OnYes?.Invoke();
-            else if (key == "N") OnNo?.Invoke();
-            else OnCancel?.Invoke();
+            CloseWithAction(OnYes);
+        }
+        else if (key == "N") 
+        {
+            CloseWithAction(OnNo);
+        }
+        else if (key == "Escape") 
+        {
+            CloseWithAction(OnCancel);
         }
 
         return true;
@@ -145,9 +148,9 @@ public class ModalComponent
     {
         if (!IsVisible) return false;
 
-        if (_yesBtn.Contains(x, y)) { IsVisible = false; OnYes?.Invoke(); return true; }
-        if (_noBtn.Contains(x, y)) { IsVisible = false; OnNo?.Invoke(); return true; }
-        if (_cancelBtn.Contains(x, y)) { IsVisible = false; OnCancel?.Invoke(); return true; }
+        if (_yesBtn.Contains(x, y)) { CloseWithAction(OnYes); return true; }
+        if (_noBtn.Contains(x, y)) { CloseWithAction(OnNo); return true; }
+        if (_cancelBtn.Contains(x, y)) { CloseWithAction(OnCancel); return true; }
 
         return true; 
     }
@@ -160,5 +163,17 @@ public class ModalComponent
         OnNo = onNo;
         OnCancel = onCancel;
         IsVisible = true;
+    }
+    
+    private void CloseWithAction(Action? action)
+    {
+        IsVisible = false;
+        _lastClosedTime = DateTime.Now;
+        action?.Invoke();
+    }
+    
+    public void TriggerRecentlyClosed()
+    {
+        _lastClosedTime = DateTime.Now;
     }
 }
