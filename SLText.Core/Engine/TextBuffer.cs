@@ -3,7 +3,7 @@ namespace SLText.Core.Engine;
 public class TextBuffer
 {
     private List<List<char>> _lines = new() { new List<char>() };
-    
+
     public int LineCount => _lines.Count;
     
     public int GetLineLength(int index) => 
@@ -13,7 +13,6 @@ public class TextBuffer
         _lines.Select(l => new string(l.ToArray()));
 
     public string GetAllText() => string.Join(Environment.NewLine, GetLines());
-
 
     public void Insert(int line, int column, char c)
     {
@@ -35,7 +34,6 @@ public class TextBuffer
         _lines.Insert(index, text.ToList());
     }
 
-    
     public void RemoveLine(int index)
     {
         if (index >= 0 && index < _lines.Count)
@@ -75,7 +73,10 @@ public class TextBuffer
 
     public void Backspace(int line, int column)
     {
-        if (column > 0) _lines[line].RemoveAt(column - 1);
+        if (column > 0)
+        {
+            _lines[line].RemoveAt(column - 1);
+        }
         else if (line > 0)
         {
             _lines[line - 1].AddRange(_lines[line]);
@@ -85,7 +86,10 @@ public class TextBuffer
 
     public void Delete(int line, int column)
     {
-        if (column < _lines[line].Count) _lines[line].RemoveAt(column);
+        if (column < _lines[line].Count)
+        {
+            _lines[line].RemoveAt(column);
+        }
         else if (line < _lines.Count - 1)
         {
             _lines[line].AddRange(_lines[line + 1]);
@@ -93,7 +97,6 @@ public class TextBuffer
         }
     }
 
-    
     public TextMemento TakeSnapshot(int line, int col)
     {
         var linesCopy = _lines.Select(l => l.ToList()).ToList();
@@ -106,7 +109,6 @@ public class TextBuffer
         if (this._lines.Count == 0) _lines.Add(new List<char>());
     }
 
-    
     private void EnsureLineExists(int line)
     {
         while (_lines.Count <= line) _lines.Add(new List<char>());
