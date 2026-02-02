@@ -6,29 +6,30 @@ namespace SLText.Core.Engine;
 
 public class InputHandler
 {
-    private readonly CursorManager _cursor;
-    private readonly TextBuffer _buffer;
+    private CursorManager _cursor;
+    private TextBuffer _buffer;
     private readonly UndoManager _undoManager;
     
     private readonly Dictionary<(bool ctrl, bool shift, string key), Func<ICommand>> _undoableShortcuts = new();
-    private readonly Dictionary<(bool ctrl, bool shift, string key), ICommand> _immediateShortcuts = new();
+    private readonly Dictionary<(bool ctrl, bool shift, string key), Func<ICommand>> _immediateShortcuts = new();
     
     private SaveFileCommand _saveCommand;
     private string _lastDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     private readonly IDialogService _dialogs;
     private TypingCommand? _currentTypingCommand;
     private string? _currentFilePath;
-    
+    private readonly Action<string?, bool> _onFileAction;
+
     public event Action<float, float>? OnScrollRequested;
     public event Action<float>? OnZoomRequested;
     
+    public event Action? OnTabCloseRequested;
+    public event Action? OnNextTabRequested;
+    public event Action? OnPreviousTabRequested;
+    
     private readonly Dictionary<char, char> _pairs = new()
     {
-        { '(', ')' },
-        { '[', ']' },
-        { '{', '}' },
-        { '"', '"' },
-        { '\'', '\'' }
+        { '(', ')' }, { '[', ']' }, { '{', '}' }, { '"', '"' }, { '\'', '\'' }
     };
     
     public InputHandler(
@@ -37,44 +38,68 @@ public class InputHandler
         UndoManager undoManager, 
         IDialogService dialogs, 
         Func<bool> getIsDirty, 
-        Action<string?, bool> onFileAction)
+        Action<string?, bool> onFileAction,
+        Action onSearchRequested)
     {
         _cursor = cursor;
         _buffer = buffer;
         _undoManager = undoManager;
         _dialogs = dialogs;
+        _onFileAction = onFileAction;
         
-        // --- COMANDOS IMEDIATOS (Navegação e Sistema - Sem Undo) ---
+        // Inicializa o SaveCommand com a aba atual
+        _saveCommand = new SaveFileCommand(dialogs, _buffer, (path) => _onFileAction(path, false), () => _lastDirectory);
+
+        // --- COMANDOS IMEDIATOS ---
+        _immediateShortcuts.Add((true, false, "RightArrow"), () => new MoveWordRightCommand(_cursor, _buffer));
+        _immediateShortcuts.Add((true, false, "LeftArrow"), () => new MoveWordLeftCommand(_cursor, _buffer));
+        _immediateShortcuts.Add((true, true, "RightArrow"), () => new MoveWordRightCommand(_cursor, _buffer));
+        _immediateShortcuts.Add((true, true, "LeftArrow"), () => new MoveWordLeftCommand(_cursor, _buffer));
+        _immediateShortcuts.Add((true, false, "UpArrow"), () => new MoveFourLinesUpCommand(_cursor));
+        _immediateShortcuts.Add((true, false, "DownArrow"), () => new MoveFourLinesDownCommand(_cursor));
+        _immediateShortcuts.Add((true, false, "L"), () => new SelectLineCommand(_cursor, _buffer));
         
-        _immediateShortcuts.Add((true, false, "RightArrow"), new MoveWordRightCommand(_cursor, _buffer));
-        _immediateShortcuts.Add((true, false, "LeftArrow"), new MoveWordLeftCommand(_cursor, _buffer));
-        _immediateShortcuts.Add((true, true, "RightArrow"), new MoveWordRightCommand(_cursor, _buffer));
-        _immediateShortcuts.Add((true, true, "LeftArrow"), new MoveWordLeftCommand(_cursor, _buffer));
-        _immediateShortcuts.Add((true, false, "UpArrow"), new MoveFourLinesUpCommand(_cursor));
-        _immediateShortcuts.Add((true, false, "DownArrow"), new MoveFourLinesDownCommand(_cursor));
-        _immediateShortcuts.Add((true, false, "L"), new SelectLineCommand(_cursor, _buffer));
-
-        _saveCommand = new SaveFileCommand(dialogs, _buffer, (path) => onFileAction(path, false), () => _lastDirectory);  
-        _immediateShortcuts.Add((true, false, "S"), _saveCommand);
-        _immediateShortcuts.Add((true, false, "O"), new OpenFileCommand(dialogs, buffer, (path) => onFileAction(path, true), () => _lastDirectory, _saveCommand, getIsDirty, _undoManager));
+        _immediateShortcuts.Add((true, false, "S"), () => _saveCommand);
         
-        var newFileCmd = new NewFileCommand(_buffer, _cursor, dialogs, _saveCommand, getIsDirty, onFileAction, _undoManager);
-        _immediateShortcuts.Add((true, false, "N"), newFileCmd);
-
-
-        // --- COMANDOS COM HISTÓRICO (Factories para Estabilidade do Undo) ---
+        _immediateShortcuts.Add((true, false, "O"), () => new OpenFileCommand(
+            _dialogs, 
+            _buffer, 
+            (path, isOpening) => _onFileAction(path, isOpening), 
+            () => _lastDirectory, 
+            _saveCommand, 
+            getIsDirty, 
+            _undoManager));
+        
+        _immediateShortcuts.Add((true, false, "N"), () => new NewFileCommand(_buffer, _cursor, dialogs, _saveCommand, getIsDirty, _onFileAction, _undoManager));
+        _immediateShortcuts.Add((true, false, "F"), () => new SearchTriggerCommand(onSearchRequested));
+        
+        // Tabs
+        _immediateShortcuts.Add((true, false, "W"), () => new AnonymousCommand(() => OnTabCloseRequested?.Invoke()));
+        
+        _immediateShortcuts.Add((true, false, "Tab"), () => new AnonymousCommand(() => OnNextTabRequested?.Invoke()));
+        
+        _immediateShortcuts.Add((true, true, "Tab"), () => new AnonymousCommand(() => OnPreviousTabRequested?.Invoke()));
+        
+        // --- COMANDOS COM HISTÓRICO ---
         _undoableShortcuts.Add((false, false, "Tab"), () => new InsertTabCommand(_buffer, _cursor));
         _undoableShortcuts.Add((false, false, "Enter"), () => new EnterCommand(_buffer, _cursor, _currentFilePath));        
-        // Deletação
         _undoableShortcuts.Add((false, false, "Backspace"), () => new BackspaceCommand(_buffer, _cursor));
         _undoableShortcuts.Add((false, false, "Delete"), () => new DeleteCommand(_buffer, _cursor));
         _undoableShortcuts.Add((true, false, "Backspace"), () => new DeleteWordLeftCommand(_cursor, _buffer));
         _undoableShortcuts.Add((true, true, "K"), () => new DeleteLineCommand(_buffer, _cursor));
-    
-        // Linhas
         _undoableShortcuts.Add((true, true, "UpArrow"), () => new MoveLineCommand(_buffer, _cursor, -1));
         _undoableShortcuts.Add((true, true, "DownArrow"), () => new MoveLineCommand(_buffer, _cursor, 1));
         _undoableShortcuts.Add((true, false, "D"), () => new DuplicateLineCommand(_buffer, _cursor));
+    }
+    
+    public void UpdateActiveData(CursorManager newCursor, TextBuffer newBuffer)
+    {
+        FinalizeTypingState();
+        _cursor = newCursor;
+        _buffer = newBuffer;
+        
+        _saveCommand = new SaveFileCommand(_dialogs, _buffer, (path) => _onFileAction(path, false), () => _lastDirectory);
+        if (_currentFilePath != null) _saveCommand.SetPath(_currentFilePath);
     }
     
     public void HandleTextInput(char c)
@@ -97,54 +122,44 @@ public class InputHandler
 
     public void HandleShortcut(bool ctrl, bool shift, string key)
     {
+        var lookup = (ctrl, shift, key);
         bool isSpecialKey = IsDestructiveKey(key) || IsMovementKey(key) || 
-                            _undoableShortcuts.ContainsKey((ctrl, shift, key)) ||
-                            _immediateShortcuts.ContainsKey((ctrl, shift, key)); 
+                            _undoableShortcuts.ContainsKey(lookup) ||
+                            _immediateShortcuts.ContainsKey(lookup); 
         
         if (!ctrl && !isSpecialKey && key.Length == 1) return;
 
         FinalizeTypingState();
 
-        // 1. Gerenciar Seleção
-        bool isMovement = IsMovementKey(key);
-        if (isMovement)
+        if (IsMovementKey(key))
         {
             if (shift) _cursor.StartSelection();
             else if (!ctrl) _cursor.ClearSelection();
         }
 
-        // 2. Atalhos Globais
         if (ctrl && !shift && key == "A") { _cursor.SelectAll(); return; }
         if (ctrl && !shift && key == "X") { HandleCut(); return; }
         if (ctrl && !shift && key == "Z") { _undoManager.Undo(); return; }
         if (ctrl && !shift && key == "Y") { _undoManager.Redo(); return; }
         
-        // 3. Deletar seleção
         if (_cursor.HasSelection && IsDestructiveKey(key))
         {
             DeleteSelectedText();
             if (key == "Backspace" || key == "Delete") return; 
         }
-        
-        var lookup = (ctrl, shift, key);
 
-        // Verifica Comandos Imediatos (Navegação/Sistema) - Execute DIRETO
-        if (_immediateShortcuts.TryGetValue(lookup, out var immediateCmd))
+        if (_immediateShortcuts.TryGetValue(lookup, out var immediateFactory))
         {
-            immediateCmd.Execute(); 
+            immediateFactory().Execute(); 
             return; 
         }
 
-        // Verifica Comandos de Edição - Passa para o UndoManager
-     
         if (_undoableShortcuts.TryGetValue(lookup, out var commandFactory))
         {
-            var cmd = commandFactory(); 
-            _undoManager.ExecuteCommand(cmd);
+            _undoManager.ExecuteCommand(commandFactory());
             return; 
         }
 
-        // Movimentação Simples e Edição Direta
         if (!ctrl) 
         {
             switch (key)
@@ -177,12 +192,9 @@ public class InputHandler
     
     public void ResetTypingState() => FinalizeTypingState();
     
-    private bool IsMovementKey(string key) 
-    {
-        return key.Contains("Arrow") || 
-               key == "Up" || key == "Down" || key == "Left" || key == "Right" ||
-               key == "Home" || key == "End" || key == "PageUp" || key == "PageDown";
-    }
+    private bool IsMovementKey(string key) => 
+        key.Contains("Arrow") || key == "Up" || key == "Down" || key == "Left" || key == "Right" ||
+        key == "Home" || key == "End" || key == "PageUp" || key == "PageDown";
 
     private bool IsDestructiveKey(string key) => 
         key == "Backspace" || key == "Delete" || key == "Enter" || key == "Tab";
@@ -195,36 +207,22 @@ public class InputHandler
     
     public void HandleCopy()
     {
-        
         var range = _cursor.GetSelectionRange();
         if (range == null) return;
-
         var (sLine, sCol, eLine, eCol) = range.Value;
-    
-        // Extrai o texto do buffer
-        List<string> selectedTextLines = new();
         var lines = _buffer.GetLines().ToList();
 
-        if (sLine == eLine)
+        string fullText;
+        if (sLine == eLine) fullText = lines[sLine].Substring(sCol, eCol - sCol);
+        else 
         {
-            selectedTextLines.Add(lines[sLine].Substring(sCol, eCol - sCol));
-        }
-        else
-        {
-            // Primeira linha
-            selectedTextLines.Add(lines[sLine].Substring(sCol));
-            // Linhas do meio
-            for (int i = sLine + 1; i < eLine; i++)
-                selectedTextLines.Add(lines[i]);
-            // Última linha
-            selectedTextLines.Add(lines[eLine].Substring(0, eCol));
+            var selectedLines = new List<string> { lines[sLine].Substring(sCol) };
+            for (int i = sLine + 1; i < eLine; i++) selectedLines.Add(lines[i]);
+            selectedLines.Add(lines[eLine].Substring(0, eCol));
+            fullText = string.Join(Environment.NewLine, selectedLines);
         }
 
-        string fullText = string.Join(Environment.NewLine, selectedTextLines);
-    
-        try {
-            ClipboardService.SetText(fullText);
-        } catch {  }
+        try { ClipboardService.SetText(fullText); } catch { }
     }
     
     public void UpdateCurrentPath(string path)
@@ -235,30 +233,23 @@ public class InputHandler
     
     public void HandleMouseScroll(float deltaY, bool ctrl, bool shift)
     {
-        
-        if (ctrl)
+        if (ctrl) OnZoomRequested?.Invoke(deltaY > 0 ? 1f : -1f);
+        else 
         {
-            float zoomAmount = deltaY > 0 ? 1f : -1f;
-        
-            OnZoomRequested?.Invoke(zoomAmount);
-        }
-        else
-        {
-            float scrollSpeed = 60f;
-            if (shift) OnScrollRequested?.Invoke(deltaY * scrollSpeed, 0);
-            else OnScrollRequested?.Invoke(0, deltaY * scrollSpeed);
+            float speed = 60f;
+            if (shift) OnScrollRequested?.Invoke(deltaY * speed, 0);
+            else OnScrollRequested?.Invoke(0, deltaY * speed);
         }
     }
     
     public void UpdateLastDirectory(string path)
     {
-        if (!string.IsNullOrEmpty(path))
-            _lastDirectory = Path.GetDirectoryName(path) ?? _lastDirectory;
+        if (!string.IsNullOrEmpty(path)) _lastDirectory = Path.GetDirectoryName(path) ?? _lastDirectory;
     }
     
     public void AddEditorShortcuts(IZoomable zoomable)
     {
-        _immediateShortcuts[(true, false, "0")] = new ResetZoomCommand(zoomable);
+        _immediateShortcuts[(true, false, "0")] = () => new ResetZoomCommand(zoomable);
     }
     
     public void FinalizeTypingState()

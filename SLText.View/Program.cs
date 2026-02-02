@@ -10,8 +10,12 @@ var undo = new UndoManager();
 
 WindowManager windowManager = null!;
 
-Action<string?, bool> onFileAction = (path, isNewFile) => {
-    windowManager.SetCurrentFile(path, isNewFile); 
+Action<string?, bool> onFileAction = (path, isOpening) => {
+    if (isOpening) {
+        windowManager.SetCurrentFile(path); 
+    } else {
+        windowManager.OnSaveSuccess(path);
+    }
 };
 
 var input = new InputHandler(
@@ -20,7 +24,8 @@ var input = new InputHandler(
     undo, 
     new NativeDialogService(),
     () => windowManager.IsDirty, 
-    onFileAction                
+    onFileAction,
+    () => windowManager.OpenSearch()
 );
 
 windowManager = new WindowManager(buffer, cursor, input, fileToOpen);

@@ -8,7 +8,7 @@ namespace SLText.View.UI.Input;
 public class MouseHandler
 {
     private readonly EditorComponent _editor;
-    private readonly CursorManager _cursor;
+    private CursorManager _cursor;
     private readonly InputHandler _inputHandler;
     private readonly IInputContext _inputContext;
     private readonly ModalComponent _modal;
@@ -26,6 +26,11 @@ public class MouseHandler
         _inputHandler = inputHandler;
         _inputContext = inputContext;
         _modal = modal;
+    }
+    
+    public void UpdateActiveCursor(CursorManager newCursor)
+    {
+        _cursor = newCursor;
     }
 
     public void OnMouseDown(IMouse mouse, MouseButton button)

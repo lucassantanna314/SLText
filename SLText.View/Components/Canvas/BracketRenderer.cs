@@ -46,7 +46,7 @@ public class BracketRenderer
             foundChar = text[col];
             foundCol = col;
         }
-        else if (col > 0 && delimiters.Contains(text[col - 1]))
+        else if (col > 0 && col <= text.Length && delimiters.Contains(text[col - 1]))
         {
             foundChar = text[col - 1];
             foundCol = col - 1;
@@ -65,9 +65,12 @@ public class BracketRenderer
 
     private void DrawBracketRect(SKCanvas canvas, TextBuffer buffer, List<string> lines, int line, int col, float textX, SKRect bounds, float lineHeight, float scrollY, SKFontMetrics metrics)
     {
+        if (line < 0 || line >= lines.Count) return;
         string lineText = lines[line];
-        float xOffset = _font.MeasureText(lineText.Substring(0, Math.Min(col, lineText.Length)));
-
+        
+        if (col < 0 || col >= lineText.Length) return;
+        
+        float xOffset = _font.MeasureText(lineText.Substring(0, col));
         float yOffset = bounds.Top + (line * lineHeight) - metrics.Ascent;
         
         float charWidth = _font.MeasureText(lineText[col].ToString());
@@ -78,8 +81,12 @@ public class BracketRenderer
             textX + xOffset + charWidth, 
             yOffset + metrics.Descent
         );
-
-        canvas.DrawRect(rect, _bracketPaint);
+        
+        float relativeY = yOffset - scrollY;
+        if (relativeY >= -lineHeight && relativeY <= bounds.Height + lineHeight)
+        {
+            canvas.DrawRect(rect, _bracketPaint);
+        }
     }
 
     private (int line, int col)? FindMatchingBracket(List<string> lines, int startLine, int startCol, char bracket)

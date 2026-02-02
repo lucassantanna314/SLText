@@ -46,20 +46,25 @@ public class GutterRenderer
 
         _font.GetFontMetrics(out var metrics);
 
-        for (int i = 0; i < visibleLineNumbers.Count; i++)
+        canvas.Save();
+        canvas.ClipRect(gutterRect);
+
+        foreach (int lineNum in visibleLineNumbers)
         {
-            int lineIndex = visibleLineNumbers[i] - 1; 
+            int lineIndex = lineNum - 1;
             float yPos = bounds.Top + (lineIndex * lineHeight) - scrollY;
 
-            if (yPos < bounds.Top - lineHeight || yPos > bounds.Bottom) continue;
+            if (yPos < bounds.Top - lineHeight) continue;
+            if (yPos > bounds.Bottom) break;
 
-            string lineNum = visibleLineNumbers[i].ToString();
-        
-            float textWidth = _font.MeasureText(lineNum);
+            string lineStr = lineNum.ToString();
+            float textWidth = _font.MeasureText(lineStr);
             float xPos = bounds.Left + width - textWidth - 10; 
 
-            canvas.DrawText(lineNum, xPos, yPos - metrics.Ascent, _font, _textPaint);
+            canvas.DrawText(lineStr, xPos, yPos - metrics.Ascent, _font, _textPaint);
         }
+
+        canvas.Restore();
     }
 
 }

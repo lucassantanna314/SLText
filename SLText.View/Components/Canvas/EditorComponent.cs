@@ -1,5 +1,6 @@
 using SkiaSharp;
 using SLText.Core.Engine;
+using SLText.Core.Engine.Model;
 using SLText.Core.Interfaces;
 using SLText.View.Abstractions;
 using SLText.View.Styles;
@@ -9,9 +10,12 @@ namespace SLText.View.Components;
 
 public class EditorComponent : IComponent, IZoomable
 {
+    private List<SearchResult> _searchResults = new();
+    private string _lastSearchTerm = "";
+    
     public SKRect Bounds { get; set; }
-    private readonly TextBuffer _buffer;
-    private readonly CursorManager _cursor;
+    private TextBuffer _buffer;
+    private CursorManager _cursor;
     private readonly SyntaxProvider _syntaxProvider = new();
     private readonly BlockAnalyzer _blockAnalyzer = new();
     
@@ -55,52 +59,107 @@ public class EditorComponent : IComponent, IZoomable
     }
 
     public void Render(SKCanvas canvas)
+{
+    using var bgPaint = new SKPaint { Color = _theme.Background };
+    canvas.DrawRect(Bounds, bgPaint);
+    
+    _viewport.UpdateBounds(Bounds);
+    _font.GetFontMetrics(out var metrics);
+
+    var lines = _buffer.GetLines().ToList();
+    float gutterWidth = _gutterRenderer.GetWidth(lines.Count);
+    float charWidth = _font.MeasureText(" ");
+    string extension = Path.GetExtension(_currentFilePath ?? "").ToLower();
+
+    var visibleLineNumbers = Enumerable.Range(1, lines.Count).ToList();
+
+    _gutterRenderer.Render(canvas, Bounds, visibleLineNumbers, _lineHeight, _viewport.ScrollY);
+
+    canvas.Save();
+    var contentClip = new SKRect(Bounds.Left + gutterWidth, Bounds.Top, Bounds.Right, Bounds.Bottom);
+    canvas.ClipRect(contentClip);
+
+    _indentGuideRenderer.Render(canvas, _buffer, _cursor, gutterWidth, charWidth, Bounds, _lineHeight, _viewport.ScrollY, extension);
+
+    canvas.Translate(-_viewport.ScrollX, -_viewport.ScrollY);
+
+    float textX = Bounds.Left + gutterWidth + 10;
+
+    for (int i = 0; i < lines.Count; i++)
     {
-        canvas.Clear(_theme.Background);
-        _viewport.UpdateBounds(Bounds);
-        _font.GetFontMetrics(out var metrics);
-
-        var lines = _buffer.GetLines().ToList();
-        float gutterWidth = _gutterRenderer.GetWidth(lines.Count);
-        float charWidth = _font.MeasureText(" ");
-        string extension = Path.GetExtension(_currentFilePath ?? "").ToLower();
+        float yPos = Bounds.Top + (i * _lineHeight) - metrics.Ascent;
     
-        var visibleLineNumbers = Enumerable.Range(1, lines.Count).ToList();
+        float relativeY = yPos - _viewport.ScrollY;
+        
+        if (relativeY < Bounds.Top - _lineHeight) continue;
+        
+        if (relativeY > Bounds.Bottom + _lineHeight) break;
     
-        _gutterRenderer.Render(canvas, Bounds, visibleLineNumbers, _lineHeight, _viewport.ScrollY);
-    
-        canvas.Save();
-        var contentClip = new SKRect(Bounds.Left + gutterWidth, Bounds.Top, Bounds.Right, Bounds.Bottom);
-        canvas.ClipRect(contentClip);
-
-        _indentGuideRenderer.Render(canvas, _buffer, _cursor, gutterWidth, charWidth, Bounds, _lineHeight, _viewport.ScrollY, extension);
-    
-        canvas.Translate(-_viewport.ScrollX, -_viewport.ScrollY);
-
-        float textX = Bounds.Left + gutterWidth + 10;
-    
-        for (int i = 0; i < lines.Count; i++)
+        if (i == _cursor.Line) RenderLineHighlight(canvas, yPos, gutterWidth, metrics);
+        
+        RenderSelection(canvas, i, yPos, gutterWidth, metrics);
+        
+        var lineResults = _searchResults.Where(r => r.Line == i);
+        foreach (var res in lineResults)
         {
-            float yPos = Bounds.Top + (i * _lineHeight) - metrics.Ascent;
-        
-            float relativeY = yPos - _viewport.ScrollY;
-            if (relativeY < -_lineHeight) continue;
-            if (relativeY > Bounds.Height + _lineHeight) break;
-        
-            if (i == _cursor.Line) RenderLineHighlight(canvas, yPos, gutterWidth, metrics);
-            RenderSelection(canvas, i, yPos, gutterWidth, metrics);
-        
-            string lineToRender = lines[i];
-            _textRenderer.RenderLine(canvas, lineToRender, textX, yPos, _currentRules);
+            float startX = _font.MeasureText(lines[i].Substring(0, res.Column));
+            float width = _font.MeasureText(lines[i].Substring(res.Column, res.Length));
 
-            if (i == _cursor.Line && _showCursor) 
-            {
-                RenderCursor(canvas, textX, yPos, lineToRender, metrics);
-            }
+            using var searchPaint = new SKPaint { Color = SKColors.BlueViolet.WithAlpha(40) };
+            var searchRect = new SKRect(
+                textX + startX, 
+                yPos + metrics.Ascent, 
+                textX + startX + width, 
+                yPos + metrics.Descent
+            );
+            canvas.DrawRect(searchRect, searchPaint);
         }
+    
+        string lineToRender = lines[i];
+        _textRenderer.RenderLine(canvas, lineToRender, textX, yPos, _currentRules);
 
-        _bracketRenderer.Render(canvas, _buffer, _cursor, textX, Bounds, _lineHeight, _viewport.ScrollY, metrics);
-        canvas.Restore();
+        if (i == _cursor.Line && _showCursor) 
+        {
+            RenderCursor(canvas, textX, yPos, lineToRender, metrics);
+        }
+    }
+
+    _bracketRenderer.Render(canvas, _buffer, _cursor, textX, Bounds, _lineHeight, _viewport.ScrollY, metrics);
+    
+    canvas.Restore();
+}
+    
+    public string GetLanguageName(string? path)
+    {
+        return _syntaxProvider.GetLanguageName(path);
+    }
+    
+    public void SetCurrentData(TextBuffer buffer, CursorManager cursor)
+    {
+        _buffer = buffer;
+        _cursor = cursor;
+        
+        _viewport.UpdateBounds(Bounds);
+
+    }
+    
+    public void SetScroll(float x, float y)
+    {
+        _viewport.ScrollX = x;
+        _viewport.ScrollY = y;
+    }
+    
+    public void PerformSearch(string term)
+    {
+        _lastSearchTerm = term;
+        _searchResults = _buffer.SearchAll(term);
+    
+        if (_searchResults.Any())
+        {
+            var first = _searchResults[0];
+            _cursor.SetPosition(first.Line, first.Column);
+            RequestScrollToCursor();
+        }
     }
     
     public void EnsureCursorVisible()

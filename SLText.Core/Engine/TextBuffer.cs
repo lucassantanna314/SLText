@@ -1,3 +1,5 @@
+using SLText.Core.Engine.Model;
+
 namespace SLText.Core.Engine;
 
 public class TextBuffer
@@ -13,6 +15,56 @@ public class TextBuffer
         _lines.Select(l => new string(l.ToArray()));
 
     public string GetAllText() => string.Join(Environment.NewLine, GetLines());
+    
+    public List<SearchResult> SearchAll(string term)
+    {
+        var results = new List<SearchResult>();
+        if (string.IsNullOrEmpty(term)) return results;
+
+        var lines = GetLines().ToList();
+        for (int i = 0; i < lines.Count; i++)
+        {
+            int index = 0;
+            string currentLine = lines[i];
+            while ((index = currentLine.IndexOf(term, index, StringComparison.OrdinalIgnoreCase)) != -1)
+            {
+                results.Add(new SearchResult(i, index, term.Length));
+                index += term.Length;
+            }
+        }
+        return results;
+    }
+    
+    public (int line, int col)? FindNext(string query, int startLine, int startCol)
+    {
+        if (string.IsNullOrEmpty(query)) return null;
+
+        var lines = GetLines().ToList();
+    
+        for (int l = startLine; l < lines.Count; l++)
+        {
+            string currentLine = lines[l];
+            int colToStart = (l == startLine) ? Math.Min(startCol, currentLine.Length) : 0;
+        
+            if (colToStart < currentLine.Length || currentLine.Length == 0)
+            {
+                int foundIndex = currentLine.IndexOf(query, colToStart, StringComparison.OrdinalIgnoreCase);
+                if (foundIndex >= 0) return (l, foundIndex);
+            }
+        }
+
+        for (int l = 0; l <= startLine; l++)
+        {
+            string currentLine = lines[l];
+            int limit = (l == startLine) ? Math.Min(startCol, currentLine.Length) : currentLine.Length;
+        
+            int foundIndex = currentLine.IndexOf(query, 0, StringComparison.OrdinalIgnoreCase);
+            if (foundIndex >= 0 && (l < startLine || foundIndex < startCol)) 
+                return (l, foundIndex);
+        }
+
+        return null;
+    }
 
     public void Insert(int line, int column, char c)
     {
@@ -73,6 +125,13 @@ public class TextBuffer
 
     public void Backspace(int line, int column)
     {
+        if (line < 0 || line >= _lines.Count) return;
+    
+        if (column > _lines[line].Count) 
+        {
+            column = _lines[line].Count; 
+        }
+
         if (column > 0)
         {
             _lines[line].RemoveAt(column - 1);
