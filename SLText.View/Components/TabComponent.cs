@@ -30,83 +30,76 @@ public class TabComponent : IComponent
     public void ApplyTheme(EditorTheme theme) => _theme = theme;
 
     public void Render(SKCanvas canvas)
-{
-    if (_tabManager.Tabs.Count == 0) return;
-    
-    using var barBg = new SKPaint { Color = _theme.StatusBarBackground }; 
-    canvas.DrawRect(Bounds, barBg);
-    
-    canvas.Save();
-    canvas.ClipRect(Bounds);
-    canvas.Translate(-_scrollX, 0);
-    
-    float currentX = Bounds.Left + 5; 
-
-    for (int i = 0; i < _tabManager.Tabs.Count; i++)
     {
-        var tab = _tabManager.Tabs[i];
-        bool isActive = i == _tabManager.ActiveTabIndex;
-        
-        var tabRect = new SKRect(currentX, Bounds.Top + 5, currentX + TabMinWidth, Bounds.Bottom);
+        if (_tabManager.Tabs.Count == 0) return;
 
-        using (var tabPaint = new SKPaint { IsAntialias = true })
+        using var barBg = new SKPaint { Color = _theme.StatusBarBackground };
+        canvas.DrawRect(Bounds, barBg);
+
+        canvas.Save();
+        canvas.ClipRect(Bounds);
+        canvas.Translate(-_scrollX, 0);
+
+        float currentX = Bounds.Left + 5;
+
+        for (int i = 0; i < _tabManager.Tabs.Count; i++)
         {
-            if (tab.IsDirty)
+            var tab = _tabManager.Tabs[i];
+            bool isActive = i == _tabManager.ActiveTabIndex;
+
+            var tabRect = new SKRect(currentX, Bounds.Top + 5, currentX + TabMinWidth, Bounds.Bottom);
+
+            using (var tabPaint = new SKPaint { IsAntialias = true })
             {
-                tabPaint.Color = new SKColor(45, 0, 90, 120); 
+                if (tab.IsDirty)
+                {
+                    tabPaint.Color = _theme.TabDirtyBackground;
+                }
+                else
+                {
+                    tabPaint.Color = isActive ? _theme.Background : _theme.LineHighlight.WithAlpha(150);
+                }
+
+                canvas.DrawRoundRect(tabRect, 4, 4, tabPaint);
             }
-            else
-            { 
-                tabPaint.Color = isActive ? _theme.Background : _theme.LineHighlight.WithAlpha(150);
+
+            using (var textPaint = new SKPaint { IsAntialias = true })
+            {
+                if (tab.IsDirty)
+                    textPaint.Color = _theme.TabDirtyForeground;
+                else
+                    textPaint.Color = isActive ? _theme.Foreground : _theme.Foreground.WithAlpha(150);
+                
+                float textY = tabRect.MidY + (_font.Size / 3);
+
+                string dirtyPrefix = tab.IsDirty ? "* " : "";
+                string title = dirtyPrefix + tab.Title;
+
+                if (_font.MeasureText(title) > TabMinWidth - 40)
+                {
+                    title = title.Substring(0, Math.Min(title.Length, 10)) + "...";
+                }
+
+                canvas.DrawText(title, tabRect.Left + 10, textY, _font, textPaint);
+
+                if (isActive)
+                {
+                    using var accentPaint = new SKPaint { Color = _theme.TabActiveAccent };
+                    var accentRect = new SKRect(tabRect.Left, tabRect.Bottom - 3, tabRect.Right, tabRect.Bottom);
+                    canvas.DrawRect(accentRect, accentPaint);
+
+                    canvas.DrawText("×", tabRect.Right - 20, textY, _font, textPaint);
+                }
             }
-        
-            canvas.DrawRoundRect(tabRect, 4, 4, tabPaint);
+
+            currentX += TabMinWidth + 2;
         }
-
-        using (var textPaint = new SKPaint { IsAntialias = true })
-        {
-            textPaint.Color = isActive ? _theme.Foreground : _theme.Foreground.WithAlpha(150);
-            float textY = tabRect.MidY + (_font.Size / 3);
-            
-            string dirtyPrefix = tab.IsDirty ? "* " : "";
-            string title = dirtyPrefix + tab.Title;
         
-            if (_font.MeasureText(title) > TabMinWidth - 40) 
-            {
-                title = title.Substring(0, Math.Min(title.Length, 10)) + "...";
-            }
-            
-            canvas.DrawText(title, tabRect.Left + 10, textY, _font, textPaint);
+        using var borderPaint = new SKPaint { Color = _theme.LineHighlight.WithAlpha(100) };
+        canvas.DrawLine(Bounds.Left, Bounds.Bottom, Bounds.Right, Bounds.Bottom, borderPaint);
 
-            if (isActive) 
-            {
-                using var accentPaint = new SKPaint { Color = SKColors.CornflowerBlue };
-                var accentRect = new SKRect(tabRect.Left, tabRect.Bottom - 3, tabRect.Right, tabRect.Bottom);
-                canvas.DrawRect(accentRect, accentPaint);
-
-                canvas.DrawText("×", tabRect.Right - 20, textY, _font, textPaint);
-            }
-        }
-
-        currentX += TabMinWidth + 2;
+        canvas.Restore();
     }
-    
-    canvas.Restore(); 
-    
-    if (_scrollX > 0 || _tabManager.Tabs.Count * (TabMinWidth + 2) > Bounds.Width)
-    {
-        using var edgePaint = new SKPaint();
-        edgePaint.Shader = SKShader.CreateLinearGradient(
-            new SKPoint(Bounds.Left, 0),
-            new SKPoint(Bounds.Right, 0),
-            new SKColor[] { _theme.StatusBarBackground, SKColors.Transparent, SKColors.Transparent, _theme.StatusBarBackground },
-            new float[] { 0, 0.05f, 0.95f, 1 },
-            SKShaderTileMode.Clamp);
-    
-        edgePaint.BlendMode = SKBlendMode.SrcOver;
-        canvas.DrawRect(Bounds, edgePaint);
-    }
-}
 
     public int GetTabIndexAt(float x, float y)
     {
@@ -118,7 +111,7 @@ public class TabComponent : IComponent
         if (index >= 0 && index < _tabManager.Tabs.Count) return index;
         return -1;
     }
-    
+
     public void ApplyScroll(float deltaX)
     {
         float totalWidth = _tabManager.Tabs.Count * (TabMinWidth + 2);

@@ -26,6 +26,10 @@ public class InputHandler
     public event Action? OnTabCloseRequested;
     public event Action? OnNextTabRequested;
     public event Action? OnPreviousTabRequested;
+    public event Action? OnToggleExplorerRequested;
+    public event Action? OnOpenFolderRequested;
+    public event Action? OnFocusExplorerSearchRequested;
+    public event Action? OnThemeToggleRequested;
     
     private readonly Dictionary<char, char> _pairs = new()
     {
@@ -70,8 +74,12 @@ public class InputHandler
             getIsDirty, 
             _undoManager));
         
+        _immediateShortcuts.Add((true, true, "O"), () => new AnonymousCommand(() => OnOpenFolderRequested?.Invoke()));
+        
         _immediateShortcuts.Add((true, false, "N"), () => new NewFileCommand(_buffer, _cursor, dialogs, _saveCommand, getIsDirty, _onFileAction, _undoManager));
         _immediateShortcuts.Add((true, false, "F"), () => new SearchTriggerCommand(onSearchRequested));
+        
+        _immediateShortcuts.Add((true, true, "F"), () => new AnonymousCommand(() => OnFocusExplorerSearchRequested?.Invoke()));
         
         // Tabs
         _immediateShortcuts.Add((true, false, "W"), () => new AnonymousCommand(() => OnTabCloseRequested?.Invoke()));
@@ -79,6 +87,10 @@ public class InputHandler
         _immediateShortcuts.Add((true, false, "Tab"), () => new AnonymousCommand(() => OnNextTabRequested?.Invoke()));
         
         _immediateShortcuts.Add((true, true, "Tab"), () => new AnonymousCommand(() => OnPreviousTabRequested?.Invoke()));
+        
+        _immediateShortcuts.Add((true, false, "B"), () => new AnonymousCommand(() => OnToggleExplorerRequested?.Invoke()));
+        
+        _immediateShortcuts.Add((true, false, "T"), () => new AnonymousCommand(() => OnThemeToggleRequested?.Invoke()));
         
         // --- COMANDOS COM HISTÓRICO ---
         _undoableShortcuts.Add((false, false, "Tab"), () => new InsertTabCommand(_buffer, _cursor));
@@ -91,7 +103,62 @@ public class InputHandler
         _undoableShortcuts.Add((true, true, "DownArrow"), () => new MoveLineCommand(_buffer, _cursor, 1));
         _undoableShortcuts.Add((true, false, "D"), () => new DuplicateLineCommand(_buffer, _cursor));
     }
-    
+
+    public List<EditorCommand> GetRegisteredCommands()
+    {
+        var commands = new List<EditorCommand>();
+
+        // file
+        commands.Add(new EditorCommand("File", "New File", () => _immediateShortcuts[(true, false, "N")]().Execute(),
+            "Ctrl+N"));
+        commands.Add(new EditorCommand("File", "Open File", () => _immediateShortcuts[(true, false, "O")]().Execute(),
+            "Ctrl+O"));
+        commands.Add(new EditorCommand("File", "Open Folder", () => OnOpenFolderRequested?.Invoke(), "Ctrl+Shift+O"));
+        commands.Add(new EditorCommand("File", "Save", () => _saveCommand.Execute(), "Ctrl+S"));
+
+        // edit
+        commands.Add(new EditorCommand("Edit", "Undo", () => _undoManager.Undo(), "Ctrl+Z"));
+        commands.Add(new EditorCommand("Edit", "Redo", () => _undoManager.Redo(), "Ctrl+Y"));
+        commands.Add(new EditorCommand("Edit", "Copy", () => HandleCopy(), "Ctrl+C"));
+        commands.Add(new EditorCommand("Edit", "Cut", () => HandleCut(), "Ctrl+X"));
+        commands.Add(new EditorCommand("Edit", "Paste", () =>
+        {
+            string? text = ClipboardService.GetText();
+            if (!string.IsNullOrEmpty(text)) HandlePaste(text);
+        }, "Ctrl+V"));
+        commands.Add(new EditorCommand("Edit", "Duplicate Line",
+            () => _undoableShortcuts[(true, false, "D")]().Execute(), "Ctrl+D"));
+        commands.Add(new EditorCommand("Edit", "Delete Line", () => _undoableShortcuts[(true, true, "K")]().Execute(),
+            "Ctrl+Shift+K"));
+
+        // visualizacao
+        commands.Add(new EditorCommand("View", "Toggle Explorer", () => OnToggleExplorerRequested?.Invoke(), "Ctrl+B"));
+        commands.Add(new EditorCommand("View", "Zoom In", () => OnZoomRequested?.Invoke(1f), "Ctrl++"));
+        commands.Add(new EditorCommand("View", "Zoom Out", () => OnZoomRequested?.Invoke(-1f), "Ctrl+-"));
+        commands.Add(new EditorCommand("View", "Reset Zoom", () => OnZoomRequested?.Invoke(0), "Ctrl+0"));
+
+        // busca
+        commands.Add(new EditorCommand("Search", "Find in File",
+            () => _immediateShortcuts[(true, false, "F")]().Execute(), "Ctrl+F"));
+        commands.Add(new EditorCommand("Search", "Focus Explorer Search",
+            () => OnFocusExplorerSearchRequested?.Invoke(), "Ctrl+Shift+F"));
+
+        // abas
+        commands.Add(new EditorCommand("Tabs", "Close Tab", () => OnTabCloseRequested?.Invoke(), "Ctrl+W"));
+        commands.Add(new EditorCommand("Tabs", "Next Tab", () => OnNextTabRequested?.Invoke(), "Ctrl+Tab"));
+        commands.Add(
+            new EditorCommand("Tabs", "Previous Tab", () => OnPreviousTabRequested?.Invoke(), "Ctrl+Shift+Tab"));
+
+        // selecao
+        commands.Add(new EditorCommand("Selection", "Select All", () => _cursor.SelectAll(), "Ctrl+A"));
+        commands.Add(new EditorCommand("Selection", "Select Line",
+            () => _immediateShortcuts[(true, false, "L")]().Execute(), "Ctrl+L"));
+        
+        commands.Add(new EditorCommand("View", "Toggle Light/Dark Theme", () => OnThemeToggleRequested?.Invoke(), "Ctrl+T"));
+        
+        return commands;
+    }
+
     public void UpdateActiveData(CursorManager newCursor, TextBuffer newBuffer)
     {
         FinalizeTypingState();
@@ -229,6 +296,11 @@ public class InputHandler
     {
         _currentFilePath = path;
         _saveCommand.SetPath(path);
+    }
+    
+    public string GetLastDirectory()
+    {
+        return _lastDirectory;
     }
     
     public void HandleMouseScroll(float deltaY, bool ctrl, bool shift)

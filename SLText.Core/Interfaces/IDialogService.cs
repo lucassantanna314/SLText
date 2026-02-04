@@ -4,6 +4,7 @@ public interface IDialogService
 {
     string? OpenFile(string filter, string defaultDirectory);
     string? SaveFile(string filter, string defaultDirectory);
+    string? OpenFolder(string defaultDirectory);
     bool? AskToSave(string fileName);
     void SetModalCallbacks(Action? onYes, Action? onNo, Action? onCancel);
 }

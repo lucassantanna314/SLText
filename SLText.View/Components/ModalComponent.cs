@@ -22,6 +22,9 @@ public class ModalComponent
     private DateTime _lastClosedTime = DateTime.MinValue;
     public bool IsRecentlyClosed => (DateTime.Now - _lastClosedTime).TotalMilliseconds < 100;
     
+    private EditorTheme _theme = EditorTheme.Dark;
+    public void ApplyTheme(EditorTheme theme) => _theme = theme;
+    
     public ModalComponent()
     {
         string fontPath = Path.Combine(AppContext.BaseDirectory, "Assets", "JetBrainsMono-Regular.ttf");
@@ -39,69 +42,75 @@ public class ModalComponent
         _font = new SKFont(typeface, 14);
         _fontBold = new SKFont(typeface, 16) { Embolden = true };
     }
-    
+
     public void Render(SKCanvas canvas, SKRect windowBounds, EditorTheme theme)
-{
-    if (!IsVisible) return;
-
-    using var dimPaint = new SKPaint { Color = new SKColor(0, 0, 0, 180) };
-    canvas.DrawRect(windowBounds, dimPaint);
-
-    float width = 450;
-    float height = 200;
-    var rect = new SKRect(
-        windowBounds.MidX - width / 2,
-        windowBounds.MidY - height / 2,
-        windowBounds.MidX + width / 2,
-        windowBounds.MidY + height / 2
-    );
-
-    using var bgPaint = new SKPaint { Color = theme.Background, IsAntialias = true };
-    canvas.DrawRoundRect(rect, 8, 8, bgPaint);
-
-    using var borderPaint = new SKPaint { Color = theme.GutterForeground, Style = SKPaintStyle.Stroke, StrokeWidth = 1, IsAntialias = true };
-    canvas.DrawRoundRect(rect, 8, 8, borderPaint);
-
-    using var textPaint = new SKPaint { Color = theme.Foreground, IsAntialias = true };
-    
-    canvas.DrawText(Title, rect.Left + 20, rect.Top + 40, _fontBold, textPaint);
-    
-    float maxWidth = rect.Width - 40; 
-    float x = rect.Left + 20;
-    float y = rect.Top + 80;        
-    float lineHeight = _font.Size + 5; 
-
-    string[] words = Message.Split(' '); 
-    string currentLine = "";
-
-    foreach (var word in words)
     {
-        string testLine = string.IsNullOrEmpty(currentLine) ? word : $"{currentLine} {word}";
-        float measuredWidth = _font.MeasureText(testLine);
+        if (!IsVisible) return;
 
-        if (measuredWidth > maxWidth && !string.IsNullOrEmpty(currentLine))
+        using var dimPaint = new SKPaint { Color = new SKColor(0, 0, 0, 150) };
+        canvas.DrawRect(windowBounds, dimPaint);
+
+        float width = 450;
+        float height = 200;
+        var rect = new SKRect(
+            windowBounds.MidX - width / 2,
+            windowBounds.MidY - height / 2,
+            windowBounds.MidX + width / 2,
+            windowBounds.MidY + height / 2
+        );
+
+        using var bgPaint = new SKPaint { Color = theme.Background, IsAntialias = true };
+        canvas.DrawRoundRect(rect, 8, 8, bgPaint);
+
+        using var borderPaint = new SKPaint 
+        { 
+            Color = theme.LineHighlight.WithAlpha(200), 
+            Style = SKPaintStyle.Stroke, 
+            StrokeWidth = 1, 
+            IsAntialias = true 
+        };
+        canvas.DrawRoundRect(rect, 8, 8, borderPaint);
+
+        using var textPaint = new SKPaint { Color = theme.Foreground, IsAntialias = true };
+        
+        canvas.DrawText(Title, rect.Left + 20, rect.Top + 40, _fontBold, textPaint);
+
+        float maxWidth = rect.Width - 40;
+        float x = rect.Left + 20;
+        float y = rect.Top + 80;
+        float lineHeight = _font.Size + 5;
+
+        string[] words = Message.Split(' ');
+        string currentLine = "";
+
+        foreach (var word in words)
+        {
+            string testLine = string.IsNullOrEmpty(currentLine) ? word : $"{currentLine} {word}";
+            float measuredWidth = _font.MeasureText(testLine);
+
+            if (measuredWidth > maxWidth && !string.IsNullOrEmpty(currentLine))
+            {
+                canvas.DrawText(currentLine, x, y, _font, textPaint);
+                currentLine = word;
+                y += lineHeight;
+            }
+            else
+            {
+                currentLine = testLine;
+            }
+        }
+
+        if (!string.IsNullOrEmpty(currentLine))
         {
             canvas.DrawText(currentLine, x, y, _font, textPaint);
-            currentLine = word; 
-            y += lineHeight;   
         }
-        else
-        {
-            currentLine = testLine;
-        }
-    }
-    
-    if (!string.IsNullOrEmpty(currentLine))
-    {
-        canvas.DrawText(currentLine, x, y, _font, textPaint);
+
+        RenderButtons(canvas, rect, theme, textPaint);
     }
 
-    RenderButtons(canvas, rect, theme, textPaint);
-}
-    
     private void RenderButtons(SKCanvas canvas, SKRect dialogRect, EditorTheme theme, SKPaint textPaint)
     {
-        float btnW = 80;
+        float btnW = 90;
         float btnH = 30;
         float spacing = 10;
         float y = dialogRect.Bottom - 50;
@@ -120,8 +129,9 @@ public class ModalComponent
         using var p = new SKPaint { Color = theme.LineHighlight, IsAntialias = true };
         canvas.DrawRoundRect(rect, 4, 4, p);
         
+        textPaint.Color = theme.Foreground;
         float textX = rect.MidX - (textPaint.MeasureText(label) / 2);
-        canvas.DrawText(label, textX, rect.MidY + 5, textPaint);
+        canvas.DrawText(label, textX, rect.MidY + (_font.Size / 3), _font, textPaint);
     }
     
     public bool HandleKeyDown(string key)

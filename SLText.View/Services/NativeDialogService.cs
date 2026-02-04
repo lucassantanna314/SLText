@@ -22,6 +22,13 @@ public class NativeDialogService : IDialogService
         return result.IsOk ? result.Path : null;
     }
     
+    public string? OpenFolder(string defaultDirectory)
+    {
+        var result = Dialog.FolderPicker(defaultDirectory);
+        Modal?.TriggerRecentlyClosed();
+        return result.IsOk ? result.Path : null;
+    }
+    
     public void SetModalCallbacks(Action? onYes, Action? onNo, Action? onCancel)
     {
         if (Modal == null) return;
