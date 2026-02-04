@@ -56,7 +56,7 @@ public class TabComponent : IComponent
                 tabPaint.Color = new SKColor(45, 0, 90, 120); 
             }
             else
-            {
+            { 
                 tabPaint.Color = isActive ? _theme.Background : _theme.LineHighlight.WithAlpha(150);
             }
         
