@@ -11,7 +11,20 @@ public class EditorTheme
     public SKColor Cursor { get; set; } = SKColors.Chocolate;
     public SKColor SelectionBackground { get; set; } = new SKColor(33, 66, 131, 180);    
     public SKColor StatusBarBackground { get; set; } = new SKColor(25, 25, 28);
-    public SKColor LineHighlight { get; set; } = new SKColor(40, 40, 40);
+    public SKColor LineHighlight { get; set; } = new SKColor(40, 50, 80, 100);
+    
+    // --- Cores do Explorer ---
+    public SKColor ExplorerBackground { get; set; } = new SKColor(20, 20, 25);
+    public SKColor ExplorerItemActive { get; set; } = new SKColor(80, 160, 255); // Linha azul lateral
+    public SKColor ExplorerSelection { get; set; } = new SKColor(40, 50, 80, 100); // Fundo do item selecionado
+    public SKColor FolderIcon { get; set; } = new SKColor(240, 200, 100);
+    public SKColor FileIconDefault { get; set; } = new SKColor(180, 180, 180);
+    public SKColor FileIconCSharp { get; set; } = new SKColor(120, 180, 240);
+    
+    // --- Cores das Abas ---
+    public SKColor TabActiveAccent { get; set; } = SKColors.CornflowerBlue;
+    public SKColor TabDirtyBackground { get; set; } = new SKColor(45, 0, 90, 180);
+    public SKColor TabDirtyForeground { get; set; } = new SKColor(220, 180, 255);
     
     public static EditorTheme Dark => new();
     

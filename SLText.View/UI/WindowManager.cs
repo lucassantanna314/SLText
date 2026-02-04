@@ -43,6 +43,8 @@ public class WindowManager : IDisposable
     
     private TabManager _tabManager = new();
     private TabComponent _tabComponent;
+    private bool _isResizingExplorer = false;
+    private FileExplorerComponent _explorer = new();
 
     private void ApplyTheme(EditorTheme theme)
     {
@@ -97,6 +99,28 @@ public class WindowManager : IDisposable
             _tabManager.PreviousTab();
             SyncActiveTab(false);
         };
+        
+        _inputHandler.OnToggleExplorerRequested += () => {
+            _explorer.IsVisible = !_explorer.IsVisible;
+        };
+        
+        _inputHandler.OnOpenFolderRequested += () => {
+            if (_inputHandler.GetDialogService() is NativeDialogService dialogs) 
+            {
+                string? folder = dialogs.OpenFolder(_inputHandler.GetLastDirectory()); 
+        
+                if (!string.IsNullOrEmpty(folder)) 
+                {
+                    _explorer.SetRootDirectory(folder);
+                    _explorer.IsVisible = true;
+                }
+            }
+        };
+        
+        _inputHandler.OnFocusExplorerSearchRequested += () => {
+            _explorer.IsVisible = true;
+            _explorer.IsFocused = true;
+        };
     }
     
     public void OpenSearch() 
@@ -141,6 +165,11 @@ public class WindowManager : IDisposable
             
             keyboard.KeyChar += (k, c) => 
             {
+                if (_explorer.IsFocused) {
+                    _explorer.HandleSearchInput(c.ToString(), false);
+                    return;
+                }
+                
                 var activeTab = _tabManager.ActiveTab;
                 if (activeTab == null) return;
 
@@ -174,18 +203,53 @@ public class WindowManager : IDisposable
         
         foreach (var mouse in input.Mice)
         {
-            mouse.MouseDown += (m, button) => 
+            mouse.MouseDown += (m, button) =>
             {
                 var pos = m.Position;
-                int clickedIndex = _tabComponent.GetTabIndexAt(pos.X, pos.Y);
+                
+               // if (!_explorer.Bounds.Contains(pos.X, pos.Y))
+              //  {
+              //      if (_explorer.IsFocused)
+              //      {
+              //          _explorer.ClearSearch(); 
+              //      }
+              //  }
 
+                if (_explorer.IsVisible && _explorer.IsOnResizeBorder(pos.X))
+                {
+                    _isResizingExplorer = true;
+                    return;
+                }
+
+                if (_explorer.IsVisible && _explorer.Bounds.Contains(pos.X, pos.Y))
+                {
+                    if (pos.Y < _explorer.Bounds.Top + 40)
+                    {
+                        _explorer.IsFocused = true;
+                    }
+                    else
+                    {
+                        _explorer.IsFocused = false;
+                        _explorer.OnMouseDown(pos.X, pos.Y); 
+                    }
+
+                    return;
+                }
+
+                if (_explorer.IsFocused) 
+                {
+                    _explorer.ClearSearch();
+                    _explorer.IsFocused = false;
+                }
+
+                int clickedIndex = _tabComponent.GetTabIndexAt(pos.X, pos.Y);
                 if (clickedIndex != -1)
                 {
                     float relativeX = (pos.X - _tabComponent.Bounds.Left) % (130 + 2);
 
-                    if (relativeX > 100) 
+                    if (relativeX > 100)
                     {
-                        _tabManager.SelectTab(clickedIndex); 
+                        _tabManager.SelectTab(clickedIndex);
                         CloseActiveTab();
                         return;
                     }
@@ -195,23 +259,100 @@ public class WindowManager : IDisposable
                         _tabManager.ActiveTab.SavedScrollX = _editor.ScrollX;
                         _tabManager.ActiveTab.SavedScrollY = _editor.ScrollY;
                     }
-        
+
                     _tabManager.SelectTab(clickedIndex);
                     SyncActiveTab(false);
-                    return; 
+                    return;
+                }
+
+                if (_editor.Bounds.Contains(pos.X, pos.Y))
+                {
+                    if (_editor.OnMouseDown(pos.X, pos.Y)) return;
                 }
 
                 _mouseHandler.OnMouseDown(m, button);
             };
+
+            mouse.MouseMove += (m, pos) => 
+            {
+                if (_isResizingExplorer)
+                {
+                    _explorer.Width = Math.Clamp(pos.X, 100, 500);
+                    return;
+                }
+                
+                _editor.OnMouseMove(pos.X, pos.Y);
+                
+                if (_explorer.IsVisible)
+                {
+                    _explorer.OnMouseMove(pos.X, pos.Y);
+                }
+                _mouseHandler.OnMouseMove(m, pos);
+            };
             
-            mouse.MouseMove += _mouseHandler.OnMouseMove; 
-            mouse.MouseUp += _mouseHandler.OnMouseUp;  
+            mouse.MouseUp += (m, button) => 
+            {
+                var pos = m.Position;
+                
+                _isResizingExplorer = false;
+
+                if (_explorer.IsVisible && _explorer.Bounds.Contains(pos.X, pos.Y))
+                {
+                    if (!_explorer.WasDragging)
+                    {
+                        var node = _explorer.GetNodeAt(pos.X, pos.Y);
+                        if (node != null)
+                        {
+                            if (node.IsDirectory)
+                            {
+                                node.IsExpanded = !node.IsExpanded;
+                                if (!node.IsExpanded) _explorer.OnFolderCollapsed();
+                                if (node.IsExpanded && node.Children.Count == 0) _explorer.LoadSubNodes(node);
+                            }
+                            else
+                            {
+                                SetCurrentFile(node.FullPath);
+                            }
+                        }
+                    }
+                    _explorer.OnMouseUp();
+                    return;
+                }
+                
+                _editor.OnMouseUp();
+                _explorer.OnMouseUp();
+                _mouseHandler.OnMouseUp(m, button);
+            };
             
             mouse.Scroll += (m, scroll) => 
             {
                 var pos = m.Position;
+                
+                bool isShiftPressed = false;
+                foreach (var kbd in input.Keyboards)
+                {
+                    if (kbd.IsKeyPressed(Key.ShiftLeft) || kbd.IsKeyPressed(Key.ShiftRight))
+                    {
+                        isShiftPressed = true;
+                        break;
+                    }
+                }
+                
+                if (_explorer.IsVisible && _explorer.Bounds.Contains(pos.X, pos.Y))
+                {
+                    float scrollSpeed = 25f;
         
-                if (_tabComponent.Bounds.Contains(pos.X, pos.Y))
+                    if (isShiftPressed)
+                    {
+                        _explorer.ApplyScroll(-scroll.Y * scrollSpeed, 0);
+                    }
+                    else
+                    {
+                        _explorer.ApplyScroll(0, -scroll.Y * scrollSpeed);
+                    }
+                }
+        
+                else if (_tabComponent.Bounds.Contains(pos.X, pos.Y))
                 {
                     _tabComponent.ApplyScroll(-scroll.Y * 25);
                 }
@@ -294,6 +435,28 @@ public class WindowManager : IDisposable
 
     private void OnKeyDown(IKeyboard k, Key key, int arg3)
     {
+        if (_explorer.IsFocused)
+        {
+            if (key == Key.Escape)
+            {
+                _explorer.IsFocused = false;
+                _explorer.ClearSearch();
+            }
+
+            if (key == Key.Backspace) 
+            { 
+                _explorer.HandleSearchInput("", true); 
+                return; 
+            }
+            return;
+        }
+        
+        if (_explorer.IsFocused)
+        {
+            if (key == Key.Escape) { _explorer.IsFocused = false; return; }
+            if (key == Key.Backspace) { _explorer.HandleSearchInput("", true); return; }
+            return;
+        }
         
         if (_search.IsVisible)
         {
@@ -392,12 +555,16 @@ public class WindowManager : IDisposable
 
         float width = _window.Size.X;
         float height = _window.Size.Y;
-        
         float tabHeight = _tabComponent.GetRequiredHeight();
-        _tabComponent.Bounds = new SKRect(0, 0, width, tabHeight);
-        _tabComponent.Render(canvas);
-        
         float footerHeight = 25;
+        
+        float explorerWidth = _explorer.IsVisible ? _explorer.Width : 0;
+        
+        _explorer.Bounds = new SKRect(0, 0, explorerWidth, height - footerHeight);
+        _explorer.Render(canvas);
+
+        _tabComponent.Bounds = new SKRect(explorerWidth, 0, width, tabHeight);
+        _tabComponent.Render(canvas);
         
         if (_tabManager.ActiveTab != null)
         {
@@ -410,7 +577,7 @@ public class WindowManager : IDisposable
                 UpdateTitle();
             }
 
-            _editor.Bounds = new SKRect(0, tabHeight, width, height - footerHeight);
+            _editor.Bounds = new SKRect(explorerWidth, tabHeight, width, height - footerHeight);
             _editor.SetCurrentData(active.Buffer, active.Cursor); 
             _editor.Render(canvas);
         }
@@ -444,68 +611,75 @@ public class WindowManager : IDisposable
         _statusBar.LanguageName = _editor.UpdateSyntax(path);
         UpdateTitle();
     }
-    
+
     public void SetCurrentFile(string path, bool resetCursor = false)
-{
-    if (string.IsNullOrEmpty(path)) 
     {
-        var newBuf = new TextBuffer();
-        var newCur = new CursorManager(newBuf);
-        _tabManager.AddTab(newBuf, newCur, null);
-    }
-    else 
-    {
-        var existingTab = _tabManager.Tabs.FirstOrDefault(t => t.FilePath == path);
-        if (existingTab != null)
+        if (string.IsNullOrEmpty(path))
         {
-            _tabManager.SelectTab(_tabManager.Tabs.IndexOf(existingTab));
+            var newBuf = new TextBuffer();
+            var newCur = new CursorManager(newBuf);
+            _tabManager.AddTab(newBuf, newCur, null);
         }
         else
         {
-            if (_tabManager.Tabs.Count == 1 && string.IsNullOrEmpty(_tabManager.Tabs[0].FilePath))
+            var existingTab = _tabManager.Tabs.FirstOrDefault(t => t.FilePath == path);
+            if (existingTab != null)
             {
-                var tab = _tabManager.Tabs[0];
-                string content = File.ReadAllText(path).Replace("\t", "    ");
-                tab.Buffer.LoadText(content);
-                tab.FilePath = path;
-                tab.IsDirty = false;
+                _tabManager.SelectTab(_tabManager.Tabs.IndexOf(existingTab));
             }
             else
             {
-                var newBuffer = new TextBuffer();
-                var newCursor = new CursorManager(newBuffer);
-                string content = File.ReadAllText(path).Replace("\t", "    ");
-                newBuffer.LoadText(content);
-                _tabManager.AddTab(newBuffer, newCursor, path);
+                if (_tabManager.Tabs.Count == 1 && string.IsNullOrEmpty(_tabManager.Tabs[0].FilePath))
+                {
+                    var tab = _tabManager.Tabs[0];
+                    string content = File.ReadAllText(path).Replace("\t", "    ");
+                    tab.Buffer.LoadText(content);
+                    tab.FilePath = path;
+                    tab.IsDirty = false;
+                }
+                else
+                {
+                    var newBuffer = new TextBuffer();
+                    var newCursor = new CursorManager(newBuffer);
+                    string content = File.ReadAllText(path).Replace("\t", "    ");
+                    newBuffer.LoadText(content);
+                    _tabManager.AddTab(newBuffer, newCursor, path);
+                }
             }
+            
+            if (!_explorer.HasRoot) 
+            {
+                string? dir = Path.GetDirectoryName(path);
+                if (dir != null) _explorer.SetRootDirectory(dir);
+            }
+
+            _inputHandler.UpdateLastDirectory(path);
         }
-        
-        _inputHandler.UpdateLastDirectory(path);
+
+        SyncActiveTab(resetCursor);
     }
 
-    SyncActiveTab(resetCursor);
-}
+    private void SyncActiveTab(bool resetCursor)
+    {
+        var active = _tabManager.ActiveTab!;
+        _currentFilePath = active.FilePath;
+        _explorer.SetSelectedFile(active.FilePath);
 
-private void SyncActiveTab(bool resetCursor)
-{
-    var active = _tabManager.ActiveTab!;
-    _currentFilePath = active.FilePath;
-    
-    _editor.SetCurrentData(active.Buffer, active.Cursor);
-    _inputHandler.UpdateActiveData(active.Cursor, active.Buffer);
-    _mouseHandler.UpdateActiveCursor(active.Cursor);
-    _statusBar.UpdateActiveBuffer(active.Buffer, active.Cursor);
+        _editor.SetCurrentData(active.Buffer, active.Cursor);
+        _inputHandler.UpdateActiveData(active.Cursor, active.Buffer);
+        _mouseHandler.UpdateActiveCursor(active.Cursor);
+        _statusBar.UpdateActiveBuffer(active.Buffer, active.Cursor);
 
-    _statusBar.LanguageName = _editor.UpdateSyntax(_currentFilePath);
-    _statusBar.FileInfo = active.Title;
-    
-    _inputHandler.UpdateCurrentPath(_currentFilePath);
-    if (resetCursor) active.Cursor.SetPosition(0, 0);
-    
-    _tabComponent.EnsureActiveTabVisible();
+        _statusBar.LanguageName = _editor.UpdateSyntax(_currentFilePath);
+        _statusBar.FileInfo = active.Title;
 
-    UpdateTitle();
-}
+        _inputHandler.UpdateCurrentPath(_currentFilePath);
+        if (resetCursor) active.Cursor.SetPosition(0, 0);
+
+        _tabComponent.EnsureActiveTabVisible();
+
+        UpdateTitle();
+    }
 
     private void OnUpdate(double dt)
     {

@@ -26,6 +26,9 @@ public class InputHandler
     public event Action? OnTabCloseRequested;
     public event Action? OnNextTabRequested;
     public event Action? OnPreviousTabRequested;
+    public event Action? OnToggleExplorerRequested;
+    public event Action? OnOpenFolderRequested;
+    public event Action? OnFocusExplorerSearchRequested;
     
     private readonly Dictionary<char, char> _pairs = new()
     {
@@ -70,8 +73,12 @@ public class InputHandler
             getIsDirty, 
             _undoManager));
         
+        _immediateShortcuts.Add((true, true, "O"), () => new AnonymousCommand(() => OnOpenFolderRequested?.Invoke()));
+        
         _immediateShortcuts.Add((true, false, "N"), () => new NewFileCommand(_buffer, _cursor, dialogs, _saveCommand, getIsDirty, _onFileAction, _undoManager));
         _immediateShortcuts.Add((true, false, "F"), () => new SearchTriggerCommand(onSearchRequested));
+        
+        _immediateShortcuts.Add((true, true, "F"), () => new AnonymousCommand(() => OnFocusExplorerSearchRequested?.Invoke()));
         
         // Tabs
         _immediateShortcuts.Add((true, false, "W"), () => new AnonymousCommand(() => OnTabCloseRequested?.Invoke()));
@@ -79,6 +86,8 @@ public class InputHandler
         _immediateShortcuts.Add((true, false, "Tab"), () => new AnonymousCommand(() => OnNextTabRequested?.Invoke()));
         
         _immediateShortcuts.Add((true, true, "Tab"), () => new AnonymousCommand(() => OnPreviousTabRequested?.Invoke()));
+        
+        _immediateShortcuts.Add((true, false, "B"), () => new AnonymousCommand(() => OnToggleExplorerRequested?.Invoke()));
         
         // --- COMANDOS COM HISTÓRICO ---
         _undoableShortcuts.Add((false, false, "Tab"), () => new InsertTabCommand(_buffer, _cursor));
@@ -229,6 +238,11 @@ public class InputHandler
     {
         _currentFilePath = path;
         _saveCommand.SetPath(path);
+    }
+    
+    public string GetLastDirectory()
+    {
+        return _lastDirectory;
     }
     
     public void HandleMouseScroll(float deltaY, bool ctrl, bool shift)
