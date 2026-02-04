@@ -39,6 +39,10 @@ public class WindowManager : IDisposable
 
     private MouseHandler _mouseHandler;
     private ModalComponent _modal = new();
+    private SearchComponent _search = new();
+    
+    private TabManager _tabManager = new();
+    private TabComponent _tabComponent;
 
     private void ApplyTheme(EditorTheme theme)
     {
@@ -65,6 +69,11 @@ public class WindowManager : IDisposable
         
         _statusBar = new StatusBarComponent(cursor, buffer, _editor);
         
+        _tabManager = new TabManager();
+        _tabComponent = new TabComponent(_tabManager);
+        _tabManager.AddTab(buffer, cursor, initialFilePath);
+        _editor = new EditorComponent(_tabManager.ActiveTab!.Buffer, _tabManager.ActiveTab.Cursor);
+        
         _currentFilePath = initialFilePath;
         
         _window.Load += OnLoad;
@@ -76,6 +85,24 @@ public class WindowManager : IDisposable
         {
             nativeDialog.Modal = _modal;
         }
+        
+        _inputHandler.OnTabCloseRequested += () => CloseActiveTab();
+
+        _inputHandler.OnNextTabRequested += () => {
+            _tabManager.NextTab();
+            SyncActiveTab(false);
+        };
+
+        _inputHandler.OnPreviousTabRequested += () => {
+            _tabManager.PreviousTab();
+            SyncActiveTab(false);
+        };
+    }
+    
+    public void OpenSearch() 
+    {
+        _search.IsVisible = true;
+        _search.Clear(); 
     }
     
     private void SetWindowIcon()
@@ -114,13 +141,32 @@ public class WindowManager : IDisposable
             
             keyboard.KeyChar += (k, c) => 
             {
+                var activeTab = _tabManager.ActiveTab;
+                if (activeTab == null) return;
+
+                if (_search.IsVisible)
+                {
+                    _search.HandleInput(c.ToString(), false);
+                    _editor.PerformSearch(_search.SearchText);
+
+                    var firstMatch = activeTab.Buffer.FindNext(_search.SearchText, activeTab.Cursor.Line, activeTab.Cursor.Column);
+        
+                    if (firstMatch.HasValue)
+                    {
+                        activeTab.Cursor.SetSelection(firstMatch.Value.line, firstMatch.Value.col, 
+                            firstMatch.Value.line, firstMatch.Value.col + _search.SearchText.Length);
+                    }
+                    return;
+                }
+    
                 if (_modal.IsVisible || _modal.IsRecentlyClosed) return;
-                
+    
                 bool ctrl = k.IsKeyPressed(Key.ControlLeft) || k.IsKeyPressed(Key.ControlRight);
                 if (ctrl) return;
-                
+    
                 _inputHandler.HandleTextInput(c);
-                if (!_isDirty) { _isDirty = true; UpdateTitle(); }
+    
+                if (!activeTab.IsDirty) { activeTab.IsDirty = true; UpdateTitle(); }
             };
         }
         
@@ -128,10 +174,52 @@ public class WindowManager : IDisposable
         
         foreach (var mouse in input.Mice)
         {
-            mouse.MouseDown += _mouseHandler.OnMouseDown;
+            mouse.MouseDown += (m, button) => 
+            {
+                var pos = m.Position;
+                int clickedIndex = _tabComponent.GetTabIndexAt(pos.X, pos.Y);
+
+                if (clickedIndex != -1)
+                {
+                    float relativeX = (pos.X - _tabComponent.Bounds.Left) % (130 + 2);
+
+                    if (relativeX > 100) 
+                    {
+                        _tabManager.SelectTab(clickedIndex); 
+                        CloseActiveTab();
+                        return;
+                    }
+
+                    if (_tabManager.ActiveTab != null)
+                    {
+                        _tabManager.ActiveTab.SavedScrollX = _editor.ScrollX;
+                        _tabManager.ActiveTab.SavedScrollY = _editor.ScrollY;
+                    }
+        
+                    _tabManager.SelectTab(clickedIndex);
+                    SyncActiveTab(false);
+                    return; 
+                }
+
+                _mouseHandler.OnMouseDown(m, button);
+            };
+            
             mouse.MouseMove += _mouseHandler.OnMouseMove; 
-            mouse.MouseUp += _mouseHandler.OnMouseUp;     
-            mouse.Scroll += _mouseHandler.OnMouseScroll;
+            mouse.MouseUp += _mouseHandler.OnMouseUp;  
+            
+            mouse.Scroll += (m, scroll) => 
+            {
+                var pos = m.Position;
+        
+                if (_tabComponent.Bounds.Contains(pos.X, pos.Y))
+                {
+                    _tabComponent.ApplyScroll(-scroll.Y * 25);
+                }
+                else
+                {
+                    _mouseHandler.OnMouseScroll(m, scroll);
+                }
+            };
         }
         
         _window.FocusChanged += (isFocused) => 
@@ -192,17 +280,73 @@ public class WindowManager : IDisposable
     
     private void UpdateTitle()
     {
-        string fileName = string.IsNullOrEmpty(_currentFilePath) 
+        var active = _tabManager.ActiveTab;
+        if (active == null) return;
+
+        string fileName = string.IsNullOrEmpty(active.FilePath) 
             ? "New File" 
-            : Path.GetFileName(_currentFilePath);
-    
-        string dirtyFlag = _isDirty ? "*" : "";
-    
+            : Path.GetFileName(active.FilePath);
+
+        string dirtyFlag = active.IsDirty ? "*" : "";
+
         _window.Title = $"SLText - {fileName}{dirtyFlag}";
     }
 
     private void OnKeyDown(IKeyboard k, Key key, int arg3)
     {
+        
+        if (_search.IsVisible)
+        {
+            if (key == Key.Escape) 
+            { 
+                _search.IsVisible = false; 
+                _editor.PerformSearch(""); 
+                _cursor.ClearSelection(); 
+                return; 
+            }
+
+            if (key == Key.Backspace) 
+            {
+                _search.HandleInput("", true); 
+
+                _editor.PerformSearch(_search.SearchText); 
+
+                var searchResult = _buffer.FindNext(_search.SearchText, _cursor.Line, 0); 
+                if (searchResult.HasValue)
+                {
+                    _cursor.SetSelection(searchResult.Value.line, searchResult.Value.col, 
+                        searchResult.Value.line, searchResult.Value.col + _search.SearchText.Length);
+                }
+                return;
+            }
+
+            if (key == Key.Enter)
+            {
+                // Procura a partir da posição atual do cursor + 1
+                var nextResult = _buffer.FindNext(_search.SearchText, _cursor.Line, _cursor.Column + 1);
+    
+                if (nextResult.HasValue)
+                {
+                    _cursor.SetSelection(nextResult.Value.line, nextResult.Value.col, 
+                        nextResult.Value.line, nextResult.Value.col + _search.SearchText.Length);
+        
+                    _editor.RequestScrollToCursor();
+                }
+                else 
+                {
+                    var firstResult = _buffer.FindNext(_search.SearchText, 0, 0);
+                    if (firstResult.HasValue)
+                    {
+                        _cursor.SetSelection(firstResult.Value.line, firstResult.Value.col, 
+                            firstResult.Value.line, firstResult.Value.col + _search.SearchText.Length);
+                        _editor.RequestScrollToCursor();
+                    }
+                }
+            }
+            
+            return; 
+        }
+        
         string? mappedKey = KeyboardMapper.Normalize(key);
         if (mappedKey == null) return;
 
@@ -248,16 +392,30 @@ public class WindowManager : IDisposable
 
         float width = _window.Size.X;
         float height = _window.Size.Y;
-        float headerHeight = 0;
+        
+        float tabHeight = _tabComponent.GetRequiredHeight();
+        _tabComponent.Bounds = new SKRect(0, 0, width, tabHeight);
+        _tabComponent.Render(canvas);
+        
         float footerHeight = 25;
         
-        // Zona do Editor 
-        _editor.Bounds = new SKRect(0, headerHeight, width, height - footerHeight);
-        _editor.Render(canvas);
+        if (_tabManager.ActiveTab != null)
+        {
+            var active = _tabManager.ActiveTab;
+    
+            if (_currentFilePath != active.FilePath)
+            {
+                _currentFilePath = active.FilePath;
+                _editor.UpdateSyntax(_currentFilePath);
+                UpdateTitle();
+            }
+
+            _editor.Bounds = new SKRect(0, tabHeight, width, height - footerHeight);
+            _editor.SetCurrentData(active.Buffer, active.Cursor); 
+            _editor.Render(canvas);
+        }
         
-        // Define e Renderiza a StatusBar (Rodapé)
         _statusBar.Bounds = new SKRect(0, height - footerHeight, width, height);
-        
         _statusBar.FileInfo = string.IsNullOrEmpty(_currentFilePath) ? "New File" : Path.GetFileName(_currentFilePath);
         _statusBar.Render(canvas);
         
@@ -265,29 +423,89 @@ public class WindowManager : IDisposable
         {
             _modal.Render(canvas, new SKRect(0, 0, width, height), _currentTheme);
         }
+        
+        if (_search.IsVisible)
+        {
+            _search.Render(canvas, new SKRect(0, 0, _window.Size.X, _window.Size.Y), _currentTheme);
+        }
 
         _grContext.Flush();
     }
     
-    public void SetCurrentFile(string path, bool resetCursor = false)
+    public void OnSaveSuccess(string? path)
     {
-        _currentFilePath = path;
-        _isDirty = false;
-        
-        _inputHandler.UpdateLastDirectory(path);
-        
-        if (resetCursor)
-        {
-            _cursor.SetPosition(0, 0); 
-            _editor.ScrollY = 0;
-        }
+        var active = _tabManager.ActiveTab;
+        if (active == null || path == null) return;
 
-        string langName = _editor.UpdateSyntax(path);
-        _statusBar.LanguageName = langName;
-        _inputHandler.UpdateCurrentPath(path);
+        active.FilePath = path;
+        active.IsDirty = false;
+        _currentFilePath = path;
     
+        _statusBar.LanguageName = _editor.UpdateSyntax(path);
         UpdateTitle();
     }
+    
+    public void SetCurrentFile(string path, bool resetCursor = false)
+{
+    if (string.IsNullOrEmpty(path)) 
+    {
+        var newBuf = new TextBuffer();
+        var newCur = new CursorManager(newBuf);
+        _tabManager.AddTab(newBuf, newCur, null);
+    }
+    else 
+    {
+        var existingTab = _tabManager.Tabs.FirstOrDefault(t => t.FilePath == path);
+        if (existingTab != null)
+        {
+            _tabManager.SelectTab(_tabManager.Tabs.IndexOf(existingTab));
+        }
+        else
+        {
+            if (_tabManager.Tabs.Count == 1 && string.IsNullOrEmpty(_tabManager.Tabs[0].FilePath))
+            {
+                var tab = _tabManager.Tabs[0];
+                string content = File.ReadAllText(path).Replace("\t", "    ");
+                tab.Buffer.LoadText(content);
+                tab.FilePath = path;
+                tab.IsDirty = false;
+            }
+            else
+            {
+                var newBuffer = new TextBuffer();
+                var newCursor = new CursorManager(newBuffer);
+                string content = File.ReadAllText(path).Replace("\t", "    ");
+                newBuffer.LoadText(content);
+                _tabManager.AddTab(newBuffer, newCursor, path);
+            }
+        }
+        
+        _inputHandler.UpdateLastDirectory(path);
+    }
+
+    SyncActiveTab(resetCursor);
+}
+
+private void SyncActiveTab(bool resetCursor)
+{
+    var active = _tabManager.ActiveTab!;
+    _currentFilePath = active.FilePath;
+    
+    _editor.SetCurrentData(active.Buffer, active.Cursor);
+    _inputHandler.UpdateActiveData(active.Cursor, active.Buffer);
+    _mouseHandler.UpdateActiveCursor(active.Cursor);
+    _statusBar.UpdateActiveBuffer(active.Buffer, active.Cursor);
+
+    _statusBar.LanguageName = _editor.UpdateSyntax(_currentFilePath);
+    _statusBar.FileInfo = active.Title;
+    
+    _inputHandler.UpdateCurrentPath(_currentFilePath);
+    if (resetCursor) active.Cursor.SetPosition(0, 0);
+    
+    _tabComponent.EnsureActiveTabVisible();
+
+    UpdateTitle();
+}
 
     private void OnUpdate(double dt)
     {
@@ -313,6 +531,50 @@ public class WindowManager : IDisposable
         _surface?.Dispose();
         _grContext?.Dispose();
         _window?.Dispose();
+    }
+    
+    public void CloseActiveTab()
+    {
+        var active = _tabManager.ActiveTab;
+        if (active == null) return;
+
+        if (active.IsDirty)
+        {
+            _modal.Show(
+                title: "Salvar alterações?",
+                message: $"O arquivo '{active.Title}' possui alterações não salvas. Deseja salvar antes de fechar?",
+                onYes: () => {
+                    _inputHandler.HandleShortcut(true, false, "S"); 
+                    FinishClosingTab();
+                },
+                onNo: () => {
+                    FinishClosingTab();
+                },
+                onCancel: () => { 
+                }
+            );
+        }
+        else
+        {
+            FinishClosingTab();
+        }
+    }
+
+    private void FinishClosingTab()
+    {
+        int index = _tabManager.ActiveTabIndex;
+        if (index == -1) return; 
+
+        _tabManager.CloseTab(index);
+
+        if (_tabManager.Tabs.Count == 0)
+        {
+            SetCurrentFile(null); 
+        }
+        else
+        {
+            SyncActiveTab(false);
+        }
     }
 
     public void Run() => _window.Run();

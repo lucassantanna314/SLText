@@ -8,7 +8,7 @@ namespace SLText.View.UI.Input;
 public class MouseHandler
 {
     private readonly EditorComponent _editor;
-    private readonly CursorManager _cursor;
+    private CursorManager _cursor;
     private readonly InputHandler _inputHandler;
     private readonly IInputContext _inputContext;
     private readonly ModalComponent _modal;
@@ -27,27 +27,34 @@ public class MouseHandler
         _inputContext = inputContext;
         _modal = modal;
     }
+    
+    public void UpdateActiveCursor(CursorManager newCursor)
+    {
+        _cursor = newCursor;
+    }
 
     public void OnMouseDown(IMouse mouse, MouseButton button)
     {
-        if (_modal.HandleClick(mouse.Position.X, mouse.Position.Y))
-        {
-            return;
-        }
-        
+        if (_modal.HandleClick(mouse.Position.X, mouse.Position.Y)) return;
+    
         _inputHandler.ResetTypingState();
-        
+    
         if (button == MouseButton.Left)
         {
-            _isMouseDown = true;
             var pos = mouse.Position;
-        
+            float gutterWidth = _editor.GetGutterWidth();
+
+            if (pos.X < _editor.Bounds.Left + gutterWidth)
+            {
+                _editor.HandleGutterClick(pos.X, pos.Y);
+                return;
+            }
+
             if (_editor.Bounds.Contains(pos.X, pos.Y))
             {
+                _isMouseDown = true;
                 var (line, col) = _editor.GetTextPositionFromMouse(pos.X, pos.Y);
             
-                _inputHandler.HandleShortcut(false, false, "None"); 
-                
                 _cursor.ClearSelection();
                 _cursor.SetPosition(line, col);
                 _cursor.StartSelection();

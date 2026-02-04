@@ -50,6 +50,12 @@ public class StatusBarComponent : IComponent
         _bgPaint.Color = _theme.StatusBarBackground;
         _textPaint.Color = _theme.Foreground;
     }
+    
+    public void UpdateActiveBuffer(TextBuffer buffer, CursorManager cursor)
+    {
+        typeof(StatusBarComponent).GetField("_buffer", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(this, buffer);
+        typeof(StatusBarComponent).GetField("_cursor", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(this, cursor);
+    }
 
     public void Render(SKCanvas canvas)
     {

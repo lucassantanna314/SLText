@@ -16,9 +16,7 @@ public class ViewportManager
     }
 
     public void UpdateBounds(SKRect bounds) => _bounds = bounds;
-
-    // Garante que o cursor esteja sempre dentro da visão, movendo o scroll se necessário.
-   
+    
     public void ScrollToCursor(int line, int column, float cursorXPos, float gutterWidth)
     {
         // --- SCROLL VERTICAL (Y) ---
@@ -39,9 +37,7 @@ public class ViewportManager
             ScrollX = Math.Max(0, cursorXPos - 20);
     }
 
-  
-    // Aplica o scroll vindo do mouse ou touch.
-  
+    
     public void ApplyScroll(float deltaX, float deltaY, float maxScrollX, float totalLinesHeight)
     {
         if (deltaX != 0)
@@ -55,18 +51,14 @@ public class ViewportManager
             ScrollY = Math.Clamp(ScrollY - deltaY, 0, maxScrollY);
         }
     }
-
-    // Converte uma coordenada de mouse para uma posição de texto (Linha/Coluna).
     
-    public (int line, int col) GetTextPosition(float mouseX, float mouseY, float gutterWidth, float charWidth)
+    public (int line, int col) GetTextPosition(float x, float y, float gutterWidth, float charWidth)
     {
-        float relativeY = mouseY - _bounds.Top + ScrollY;
-        int line = (int)(relativeY / _lineHeight);
+        float documentY = y + ScrollY;
+        int line = (int)(documentY / _lineHeight);
 
-        float textAreaLeft = _bounds.Left + gutterWidth; 
-        float relativeX = (mouseX - textAreaLeft) + ScrollX; 
-
-        int col = (int)Math.Max(0, Math.Round(relativeX / charWidth));
+        float documentX = x - _bounds.Left - gutterWidth - 10 + ScrollX;
+        int col = (int)Math.Round(documentX / charWidth);
 
         return (line, col);
     }

@@ -64,6 +64,17 @@ public class CursorManager
         Column = Math.Clamp(column, 0, _buffer.GetLineLength(Line));
         _desiredColumn = Column;
     }
+    
+    public void SetSelection(int startLine, int startCol, int endLine, int endCol)
+    {
+        SelectionAnchorLine = startLine;
+        SelectionAnchorColumn = startCol;
+
+        Line = Math.Clamp(endLine, 0, _buffer.LineCount - 1);
+        Column = Math.Clamp(endCol, 0, _buffer.GetLineLength(Line));
+    
+        _desiredColumn = Column;
+    }
 
     private void UpdateColumnToDesired()
     {
