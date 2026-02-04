@@ -244,7 +244,18 @@ public class InputHandler
     
     public void UpdateLastDirectory(string path)
     {
-        if (!string.IsNullOrEmpty(path)) _lastDirectory = Path.GetDirectoryName(path) ?? _lastDirectory;
+        if (!string.IsNullOrEmpty(path))
+        {
+            try 
+            {
+                var directory = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(directory))
+                {
+                    _lastDirectory = directory;
+                }
+            }
+            catch { }
+        }
     }
     
     public void AddEditorShortcuts(IZoomable zoomable)

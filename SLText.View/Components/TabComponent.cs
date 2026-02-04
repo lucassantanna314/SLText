@@ -32,7 +32,7 @@ public class TabComponent : IComponent
     public void Render(SKCanvas canvas)
 {
     if (_tabManager.Tabs.Count == 0) return;
-
+    
     using var barBg = new SKPaint { Color = _theme.StatusBarBackground }; 
     canvas.DrawRect(Bounds, barBg);
     
@@ -51,7 +51,15 @@ public class TabComponent : IComponent
 
         using (var tabPaint = new SKPaint { IsAntialias = true })
         {
-            tabPaint.Color = isActive ? _theme.Background : _theme.LineHighlight.WithAlpha(150);
+            if (tab.IsDirty)
+            {
+                tabPaint.Color = new SKColor(45, 0, 90, 120); 
+            }
+            else
+            {
+                tabPaint.Color = isActive ? _theme.Background : _theme.LineHighlight.WithAlpha(150);
+            }
+        
             canvas.DrawRoundRect(tabRect, 4, 4, tabPaint);
         }
 
@@ -60,9 +68,13 @@ public class TabComponent : IComponent
             textPaint.Color = isActive ? _theme.Foreground : _theme.Foreground.WithAlpha(150);
             float textY = tabRect.MidY + (_font.Size / 3);
             
-            string title = tab.Title;
+            string dirtyPrefix = tab.IsDirty ? "* " : "";
+            string title = dirtyPrefix + tab.Title;
+        
             if (_font.MeasureText(title) > TabMinWidth - 40) 
+            {
                 title = title.Substring(0, Math.Min(title.Length, 10)) + "...";
+            }
             
             canvas.DrawText(title, tabRect.Left + 10, textY, _font, textPaint);
 

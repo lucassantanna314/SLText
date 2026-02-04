@@ -9,8 +9,13 @@ var cursor = new CursorManager(buffer);
 var undo = new UndoManager();
 
 WindowManager windowManager = null!;
+InputHandler input = null!;
 
 Action<string?, bool> onFileAction = (path, isOpening) => {
+    if (path != null) 
+    {
+        input.UpdateLastDirectory(path);
+    }
     if (isOpening) {
         windowManager.SetCurrentFile(path); 
     } else {
@@ -18,7 +23,7 @@ Action<string?, bool> onFileAction = (path, isOpening) => {
     }
 };
 
-var input = new InputHandler(
+input = new InputHandler(
     cursor, 
     buffer, 
     undo, 

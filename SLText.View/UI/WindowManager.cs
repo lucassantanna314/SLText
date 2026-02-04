@@ -479,6 +479,8 @@ public class WindowManager : IDisposable
                 _tabManager.AddTab(newBuffer, newCursor, path);
             }
         }
+        
+        _inputHandler.UpdateLastDirectory(path);
     }
 
     SyncActiveTab(resetCursor);
