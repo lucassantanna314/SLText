@@ -11,10 +11,12 @@ public class SearchComponent
     
     private SKRect _bounds;
     private readonly SKFont _font;
+    private EditorTheme _theme = EditorTheme.Dark;
+    
+    public void ApplyTheme(EditorTheme theme) => _theme = theme;
     
     public SearchComponent()
     {
-        // Seguindo o padrão do seu ModalComponent para carregar a fonte dos Assets
         string fontPath = Path.Combine(AppContext.BaseDirectory, "Assets", "JetBrainsMono-Regular.ttf");
         SKTypeface typeface;
 
@@ -24,7 +26,6 @@ public class SearchComponent
         }
         else
         {
-            // Fallback caso o arquivo não exista
             typeface = SKTypeface.FromFamilyName("monospace", SKFontStyle.Normal);
         }
 
@@ -54,7 +55,7 @@ public class SearchComponent
 
         using var borderPaint = new SKPaint
         {
-            Color = theme.GutterForeground, 
+            Color = theme.LineHighlight, 
             Style = SKPaintStyle.Stroke, 
             StrokeWidth = 1, 
             IsAntialias = true

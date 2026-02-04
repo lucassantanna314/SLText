@@ -94,6 +94,9 @@ public class TabComponent : IComponent
 
             currentX += TabMinWidth + 2;
         }
+        
+        using var borderPaint = new SKPaint { Color = _theme.LineHighlight.WithAlpha(100) };
+        canvas.DrawLine(Bounds.Left, Bounds.Bottom, Bounds.Right, Bounds.Bottom, borderPaint);
 
         canvas.Restore();
     }

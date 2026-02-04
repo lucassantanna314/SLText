@@ -57,8 +57,8 @@ public class ViewportManager
         float documentY = y + ScrollY;
         int line = (int)(documentY / _lineHeight);
 
-        float documentX = x - _bounds.Left - gutterWidth - 10 + ScrollX;
-        int col = (int)Math.Round(documentX / charWidth);
+        float documentX = x - gutterWidth - 10 + ScrollX;
+        int col = (int)Math.Round(Math.Max(0, documentX) / charWidth);
 
         return (line, col);
     }

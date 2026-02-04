@@ -45,12 +45,17 @@ public class WindowManager : IDisposable
     private TabComponent _tabComponent;
     private bool _isResizingExplorer = false;
     private FileExplorerComponent _explorer = new();
+    private CommandPaletteComponent _commandPalette = new();
 
     private void ApplyTheme(EditorTheme theme)
     {
         _currentTheme = theme;
         _editor.SetTheme(theme);
         _statusBar.ApplyTheme(theme);
+        _explorer.ApplyTheme(theme);
+        _commandPalette.ApplyTheme(theme);
+        _tabComponent.ApplyTheme(theme);
+        _search.ApplyTheme(theme);
     }
 
     public WindowManager(TextBuffer buffer, CursorManager cursor, InputHandler input, string? initialFilePath = null)
@@ -121,6 +126,14 @@ public class WindowManager : IDisposable
             _explorer.IsVisible = true;
             _explorer.IsFocused = true;
         };
+        
+        _inputHandler.OnThemeToggleRequested += () => 
+        {
+            if (_currentTheme.Background.Red < 128) 
+                ApplyTheme(EditorTheme.Light);
+            else 
+                ApplyTheme(EditorTheme.Dark);
+        };
     }
     
     public void OpenSearch() 
@@ -165,6 +178,12 @@ public class WindowManager : IDisposable
             
             keyboard.KeyChar += (k, c) => 
             {
+                if (_commandPalette.IsVisible)
+                {
+                    _commandPalette.HandleInput(c.ToString(), false);
+                    return;
+                }
+                
                 if (_explorer.IsFocused) {
                     _explorer.HandleSearchInput(c.ToString(), false);
                     return;
@@ -206,6 +225,7 @@ public class WindowManager : IDisposable
             mouse.MouseDown += (m, button) =>
             {
                 var pos = m.Position;
+                float explorerWidth = _explorer.IsVisible ? _explorer.Width : 0;
                 
                // if (!_explorer.Bounds.Contains(pos.X, pos.Y))
               //  {
@@ -264,13 +284,12 @@ public class WindowManager : IDisposable
                     SyncActiveTab(false);
                     return;
                 }
-
+                
                 if (_editor.Bounds.Contains(pos.X, pos.Y))
                 {
                     if (_editor.OnMouseDown(pos.X, pos.Y)) return;
+                    _mouseHandler.OnMouseDown(pos.X, pos.Y, button);
                 }
-
-                _mouseHandler.OnMouseDown(m, button);
             };
 
             mouse.MouseMove += (m, pos) => 
@@ -435,6 +454,35 @@ public class WindowManager : IDisposable
 
     private void OnKeyDown(IKeyboard k, Key key, int arg3)
     {
+
+        bool ctrl = k.IsKeyPressed(Key.ControlLeft) || k.IsKeyPressed(Key.ControlRight);
+        bool shift = k.IsKeyPressed(Key.ShiftLeft) || k.IsKeyPressed(Key.ShiftRight);
+
+        if (_commandPalette.IsVisible)
+        {
+            if (key == Key.Escape) { _commandPalette.IsVisible = false; return; }
+            if (key == Key.Up) { _commandPalette.MoveSelection(-1); return; }
+            if (key == Key.Down) { _commandPalette.MoveSelection(1); return; }
+            if (key == Key.Backspace) { _commandPalette.HandleInput("", true); return; }
+            if (key == Key.Enter)
+            {
+                var cmd = _commandPalette.GetSelectedCommand();
+                if (cmd != null)
+                {
+                    _commandPalette.IsVisible = false;
+                    cmd.Action.Invoke();
+                }
+                return;
+            }
+        }
+        
+        if (ctrl && shift && key == Key.P)
+        {
+            _commandPalette.IsVisible = true;
+            _commandPalette.LoadCommands(_inputHandler.GetRegisteredCommands());
+            return;
+        }
+        
         if (_explorer.IsFocused)
         {
             if (key == Key.Escape)
@@ -448,13 +496,6 @@ public class WindowManager : IDisposable
                 _explorer.HandleSearchInput("", true); 
                 return; 
             }
-            return;
-        }
-        
-        if (_explorer.IsFocused)
-        {
-            if (key == Key.Escape) { _explorer.IsFocused = false; return; }
-            if (key == Key.Backspace) { _explorer.HandleSearchInput("", true); return; }
             return;
         }
         
@@ -518,9 +559,6 @@ public class WindowManager : IDisposable
             if (_modal.HandleKeyDown(mappedKey)) return;
         }
         
-        bool ctrl = k.IsKeyPressed(Key.ControlLeft) || k.IsKeyPressed(Key.ControlRight);
-        bool shift = k.IsKeyPressed(Key.ShiftLeft) || k.IsKeyPressed(Key.ShiftRight);
-
         if (ctrl && key == Key.C) { _inputHandler.HandleCopy(); return; }
         if (ctrl && key == Key.V) 
         {
@@ -594,6 +632,13 @@ public class WindowManager : IDisposable
         if (_search.IsVisible)
         {
             _search.Render(canvas, new SKRect(0, 0, _window.Size.X, _window.Size.Y), _currentTheme);
+        }
+        
+        if (_commandPalette.IsVisible)
+        {
+            _commandPalette.Bounds = new SKRect(0, 0, width, height);
+            _commandPalette.ApplyTheme(_currentTheme);
+            _commandPalette.Render(canvas);
         }
 
         _grContext.Flush();

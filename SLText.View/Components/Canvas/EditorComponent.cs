@@ -285,11 +285,18 @@ public class EditorComponent : IComponent, IZoomable
     {
         _font.GetFontMetrics(out var metrics);
 
-        float localX = x - Bounds.Left;
-        float localY = y - Bounds.Top + metrics.Ascent;
+        float gutterWidth = _gutterRenderer.GetWidth(_buffer.LineCount);
+    
+        float localX = x - Bounds.Left - gutterWidth - 10;
+    
+        float localY = y - Bounds.Top;
 
-        return _viewport.GetTextPosition(localX, localY, _gutterRenderer.GetWidth(_buffer.LineCount),
-            _font.MeasureText(" "));
+        return _viewport.GetTextPosition(
+            localX, 
+            localY, 
+            0, 
+            _font.MeasureText(" ")
+        );
     }
 
     public string UpdateSyntax(string? path)

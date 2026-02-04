@@ -33,27 +33,26 @@ public class MouseHandler
         _cursor = newCursor;
     }
 
-    public void OnMouseDown(IMouse mouse, MouseButton button)
+    public void OnMouseDown(float x, float y, MouseButton button)
     {
-        if (_modal.HandleClick(mouse.Position.X, mouse.Position.Y)) return;
-    
+        if (_modal.HandleClick(x, y)) return;
+
         _inputHandler.ResetTypingState();
-    
+
         if (button == MouseButton.Left)
         {
-            var pos = mouse.Position;
             float gutterWidth = _editor.GetGutterWidth();
 
-            if (pos.X < _editor.Bounds.Left + gutterWidth)
+            if (x < _editor.Bounds.Left + gutterWidth)
             {
-                _editor.HandleGutterClick(pos.X, pos.Y);
+                _editor.HandleGutterClick(x, y);
                 return;
             }
 
-            if (_editor.Bounds.Contains(pos.X, pos.Y))
+            if (_editor.Bounds.Contains(x, y))
             {
                 _isMouseDown = true;
-                var (line, col) = _editor.GetTextPositionFromMouse(pos.X, pos.Y);
+                var (line, col) = _editor.GetTextPositionFromMouse(x, y);
             
                 _cursor.ClearSelection();
                 _cursor.SetPosition(line, col);

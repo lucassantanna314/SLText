@@ -9,7 +9,7 @@ public class FileExplorerComponent : IComponent
 {
     public SKRect Bounds { get; set; }
     public bool IsVisible { get; set; } = false;
-    public float Width { get; set; } = 200;
+    public float Width { get; set; } = 250;
     private EditorTheme _theme = EditorTheme.Dark;
     private readonly SKFont _font;
     
@@ -72,19 +72,20 @@ public class FileExplorerComponent : IComponent
         var result = new List<FileNode>();
         foreach (var node in nodes)
         {
-            if (node.Name.ToLower().Contains(query))
+            bool matches = node.Name.ToLower().Contains(query);
+            List<FileNode> matchedChildren = new();
+
+            if (node.IsDirectory)
             {
+                matchedChildren = FilterRecursive(node.Children, query);
+            }
+
+            if (matches || matchedChildren.Count > 0)
+            {
+                if (matchedChildren.Count > 0) node.IsExpanded = true;
                 result.Add(node);
             }
-            else if (node.IsDirectory)
-            {
-                var children = FilterRecursive(node.Children, query);
-                if (children.Count > 0)
-                {
-                    node.IsExpanded = true; 
-                    result.Add(node);
-                }
-            }
+            
         }
         return result;
     }
@@ -115,7 +116,9 @@ public class FileExplorerComponent : IComponent
     
     public void ApplyScroll(float deltaX, float deltaY)
     {
-        float totalHeight = GetTotalHeight(_rootNodes);
+        var currentNodes = string.IsNullOrEmpty(_searchText) ? _rootNodes : _filteredNodes;
+        
+        float totalHeight = GetTotalHeight(currentNodes);
         float maxScrollY = Math.Max(0, totalHeight - Bounds.Height + 60);
         _scrollY = Math.Clamp(_scrollY + deltaY, 0, maxScrollY);
 
@@ -235,9 +238,41 @@ public class FileExplorerComponent : IComponent
                 DrawFolderIcon(canvas, xOffset, y, node.IsExpanded, iconPaint);
             else
                 DrawFileIcon(canvas, xOffset, y, node.Name, iconPaint);
+            
+            //highlight
+            float currentX = xOffset + 20;
+            string name = node.Name;
+            string query = _searchText.ToLower();
 
-            paint.Color = node.FullPath == _selectedFilePath ? SKColors.White : _theme.Foreground;
-            canvas.DrawText(node.Name, xOffset + 20, y, _font, paint);
+            if (!string.IsNullOrEmpty(query) && name.ToLower().Contains(query))
+            {
+                int startIndex = name.ToLower().IndexOf(query);
+
+                string prefix = name.Substring(0, startIndex);
+                canvas.DrawText(prefix, currentX, y, _font, paint);
+                currentX += _font.MeasureText(prefix);
+                
+                string match = name.Substring(startIndex, query.Length);
+                using (var highlightPaint = new SKPaint { Color = _theme.LineHighlight.WithAlpha(180) })
+                {
+                    var highlightRect = new SKRect(currentX, y - 13, currentX + _font.MeasureText(match), y + 3);
+                    canvas.DrawRect(highlightRect, highlightPaint);
+                }
+                
+                canvas.DrawText(match, currentX, y, _font, paint);
+                currentX += _font.MeasureText(match);
+                
+                string suffix = name.Substring(startIndex + query.Length);
+                canvas.DrawText(suffix, currentX, y, _font, paint);
+                
+            }
+            else
+            {
+                paint.Color = node.FullPath == _selectedFilePath ? SKColors.White : _theme.Foreground;
+                canvas.DrawText(node.Name, xOffset + 20, y, _font, paint); 
+            }
+            
+            
         }
 
         y += ItemHeight;

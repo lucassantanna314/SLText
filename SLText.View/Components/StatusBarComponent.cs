@@ -8,13 +8,10 @@ namespace SLText.View.Components;
 public class StatusBarComponent : IComponent
 {
     public SKRect Bounds { get; set; }
-    private readonly CursorManager _cursor;
-    private readonly TextBuffer _buffer;
+    private CursorManager _cursor;
+    private TextBuffer _buffer;
 
-    private readonly SKPaint _bgPaint = new();
-    private readonly SKPaint _textPaint = new() { IsAntialias = true };
     private readonly SKFont _font;
-    
     private EditorTheme _theme = EditorTheme.Dark;
     
     public string LanguageName { get; set; } = "Plain Text";
@@ -40,40 +37,37 @@ public class StatusBarComponent : IComponent
         }
         
         _font = new SKFont(typeface, 12);
-        
-        ApplyTheme(_theme);
     }
     
-    public void ApplyTheme(EditorTheme theme)
-    {
-        _theme = theme;
-        _bgPaint.Color = _theme.StatusBarBackground;
-        _textPaint.Color = _theme.Foreground;
-    }
+    public void ApplyTheme(EditorTheme theme) => _theme = theme;
     
     public void UpdateActiveBuffer(TextBuffer buffer, CursorManager cursor)
     {
-        typeof(StatusBarComponent).GetField("_buffer", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(this, buffer);
-        typeof(StatusBarComponent).GetField("_cursor", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(this, cursor);
+        _buffer = buffer;
+        _cursor = cursor;
     }
 
     public void Render(SKCanvas canvas)
     {
-        canvas.DrawRect(Bounds, _bgPaint);
+        using var bgPaint = new SKPaint { Color = _theme.StatusBarBackground };
+        using var textPaint = new SKPaint { Color = _theme.Foreground, IsAntialias = true };
+        
+        canvas.DrawRect(Bounds, bgPaint);
+        
         _font.GetFontMetrics(out var metrics);
         float textY = Bounds.MidY - (metrics.Ascent + metrics.Descent) / 2;
 
         // --- LADO ESQUERDO: Contagem de Linhas e LINGUAGEM ---
         string leftText = $"{_buffer.LineCount} Linhas  |  {LanguageName}  | Font: {_editor.FontSize:0}pt";
-        canvas.DrawText(leftText, Bounds.Left + 15, textY, _font, _textPaint);
+        canvas.DrawText(leftText, Bounds.Left + 15, textY, _font, textPaint);
 
         // --- CENTRO: Nome do Arquivo ---
         float fileTextWidth = _font.MeasureText(FileInfo);
-        canvas.DrawText(FileInfo, Bounds.MidX - (fileTextWidth / 2), textY, _font, _textPaint);
+        canvas.DrawText(FileInfo, Bounds.MidX - (fileTextWidth / 2), textY, _font, textPaint);
 
         // --- DIREITA: Posição do Cursor ---
         string positionText = $"Ln {_cursor.Line + 1}, Col {_cursor.Column + 1}";
-        canvas.DrawText(positionText, Bounds.Right - _font.MeasureText(positionText) - 15, textY, _font, _textPaint);
+        canvas.DrawText(positionText, Bounds.Right - _font.MeasureText(positionText) - 15, textY, _font, textPaint);
     }
 
     public void Update(double deltaTime) { }
