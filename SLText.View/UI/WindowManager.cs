@@ -5,7 +5,6 @@ using SLText.Core.Engine;
 using SLText.View.Components;
 using System.Runtime.InteropServices;
 using Silk.NET.Core;
-using SLText.View.Components.Canvas;
 using SLText.View.Services;
 using SLText.View.Styles;
 using SLText.View.UI.Input;
@@ -46,6 +45,9 @@ public class WindowManager : IDisposable
     private bool _isResizingExplorer = false;
     private FileExplorerComponent _explorer = new();
     private CommandPaletteComponent _commandPalette = new();
+    private TerminalComponent _terminal;
+    private bool _isTerminalFocused = false;
+    private IMouse? _primaryMouse;
 
     private void ApplyTheme(EditorTheme theme)
     {
@@ -56,6 +58,7 @@ public class WindowManager : IDisposable
         _commandPalette.ApplyTheme(theme);
         _tabComponent.ApplyTheme(theme);
         _search.ApplyTheme(theme);
+        _terminal.ApplyTheme(theme);
     }
 
     public WindowManager(TextBuffer buffer, CursorManager cursor, InputHandler input, string? initialFilePath = null)
@@ -64,6 +67,7 @@ public class WindowManager : IDisposable
         options.Size = new Silk.NET.Maths.Vector2D<int>(800, 600);
         options.Title = "SLText";
         _window = Window.Create(options);
+        _window.Closing += OnWindowClosing;
         
         
         _buffer = buffer;
@@ -80,6 +84,7 @@ public class WindowManager : IDisposable
         _tabComponent = new TabComponent(_tabManager);
         _tabManager.AddTab(buffer, cursor, initialFilePath);
         _editor = new EditorComponent(_tabManager.ActiveTab!.Buffer, _tabManager.ActiveTab.Cursor);
+        _terminal = new TerminalComponent();
         
         _currentFilePath = initialFilePath;
         
@@ -118,6 +123,7 @@ public class WindowManager : IDisposable
                 {
                     _explorer.SetRootDirectory(folder);
                     _explorer.IsVisible = true;
+                    _terminal.SetWorkingDirectory(folder);
                 }
             }
         };
@@ -134,6 +140,30 @@ public class WindowManager : IDisposable
             else 
                 ApplyTheme(EditorTheme.Dark);
         };
+
+        _inputHandler.OnNewTerminalTabRequested += () => {
+            if (!_terminal.IsVisible) _terminal.IsVisible = true;
+    
+            _isTerminalFocused = true;
+            _terminal.CreateNewTab("bash");
+        };
+        
+        _inputHandler.OnTerminalInterruptRequested += () => {
+            if (_isTerminalFocused && _terminal.IsVisible)
+            {
+                _terminal.InterruptActiveTerminal();
+            }
+            else if (!_isTerminalFocused)
+            {
+                _inputHandler.HandleCopy();
+            }
+        };
+    }
+    
+    private void OnWindowClosing()
+    {
+        _terminal.ShutdownAllTerminals();
+        Console.WriteLine("Aplicação e sub-processos encerrados com sucesso.");
     }
     
     public void OpenSearch() 
@@ -171,6 +201,7 @@ public class WindowManager : IDisposable
 
         // Configura Input da Silk.NET
         var input = _window.CreateInput();
+        _primaryMouse = input.Mice[0];
         
         foreach (var keyboard in input.Keyboards)
         {
@@ -211,6 +242,12 @@ public class WindowManager : IDisposable
     
                 bool ctrl = k.IsKeyPressed(Key.ControlLeft) || k.IsKeyPressed(Key.ControlRight);
                 if (ctrl) return;
+                
+                if (_isTerminalFocused && _terminal.IsVisible)
+                {
+                    _terminal.HandleKeyDown(c.ToString());
+                    return;
+                }
     
                 _inputHandler.HandleTextInput(c);
     
@@ -224,16 +261,27 @@ public class WindowManager : IDisposable
         {
             mouse.MouseDown += (m, button) =>
             {
-                var pos = m.Position;
+                var pos = m.Position; 
                 float explorerWidth = _explorer.IsVisible ? _explorer.Width : 0;
+              
+                if (_terminal.IsVisible && _terminal.Bounds.Contains(pos.X, pos.Y))
+                {
+                    _isTerminalFocused = true; 
+                    _explorer.IsFocused = false;
+                    _terminal.OnMouseDown(pos.X, pos.Y);
+                    return;
+                }
                 
-               // if (!_explorer.Bounds.Contains(pos.X, pos.Y))
-              //  {
-              //      if (_explorer.IsFocused)
-              //      {
-              //          _explorer.ClearSearch(); 
-              //      }
-              //  }
+                if (_terminal.IsVisible && Math.Abs(pos.Y - _terminal.Bounds.Top) < 15 && pos.X > explorerWidth)
+                {
+                    _terminal.OnMouseDown(pos.X, pos.Y); 
+                    return;
+                }
+                
+                if (_editor.Bounds.Contains(pos.X, pos.Y) || _explorer.Bounds.Contains(pos.X, pos.Y))
+                {
+                    _isTerminalFocused = false;
+                }
 
                 if (_explorer.IsVisible && _explorer.IsOnResizeBorder(pos.X))
                 {
@@ -294,10 +342,33 @@ public class WindowManager : IDisposable
 
             mouse.MouseMove += (m, pos) => 
             {
+                
                 if (_isResizingExplorer)
                 {
                     _explorer.Width = Math.Clamp(pos.X, 100, 500);
                     return;
+                }
+                
+                if (_terminal.IsResizing)
+                {
+                    _terminal.OnMouseMove(pos.X, pos.Y, _window.Size.Y);
+                    foreach (var mouse in input.Mice)
+                    {
+                        mouse.Cursor.StandardCursor = StandardCursor.VResize;
+                    }
+                    return;
+                }
+                else 
+                {
+                    foreach (var mouse in input.Mice)
+                    {
+                        mouse.Cursor.StandardCursor = StandardCursor.Default;
+                    }
+                }
+                
+                if (_terminal.IsVisible)
+                {
+                    _terminal.OnMouseMove(pos.X, pos.Y, _window.Size.Y);
                 }
                 
                 _editor.OnMouseMove(pos.X, pos.Y);
@@ -339,6 +410,7 @@ public class WindowManager : IDisposable
                 }
                 
                 _editor.OnMouseUp();
+                _terminal.OnMouseUp();
                 _explorer.OnMouseUp();
                 _mouseHandler.OnMouseUp(m, button);
             };
@@ -355,6 +427,12 @@ public class WindowManager : IDisposable
                         isShiftPressed = true;
                         break;
                     }
+                }
+                
+                if (_terminal.IsVisible && _terminal.Bounds.Contains(pos.X, pos.Y))
+                {
+                    _terminal.ApplyScroll(-scroll.Y * 25f);
+                    return;
                 }
                 
                 if (_explorer.IsVisible && _explorer.Bounds.Contains(pos.X, pos.Y))
@@ -458,6 +536,37 @@ public class WindowManager : IDisposable
         bool ctrl = k.IsKeyPressed(Key.ControlLeft) || k.IsKeyPressed(Key.ControlRight);
         bool shift = k.IsKeyPressed(Key.ShiftLeft) || k.IsKeyPressed(Key.ShiftRight);
 
+        if (_isTerminalFocused && _terminal.IsVisible)
+        {
+            if (key == Key.Up || key == Key.Down)
+            {
+                _terminal.HandleSpecialKey(key);
+                return;
+            }
+            
+            if (key == Key.Escape)
+            {
+                _isTerminalFocused = false;
+                return;
+            }
+
+            if (key == Key.Enter)
+            {
+                _terminal.HandleKeyDown("\n");
+                return;
+            }
+
+            if (key == Key.Backspace)
+            {
+                _terminal.HandleKeyDown("Backspace");
+                return;
+            }
+
+            if (IsNavigationOnly(key)) return; 
+        
+            if (!ctrl) return; 
+        }
+        
         if (_commandPalette.IsVisible)
         {
             if (key == Key.Escape) { _commandPalette.IsVisible = false; return; }
@@ -593,11 +702,11 @@ public class WindowManager : IDisposable
 
         float width = _window.Size.X;
         float height = _window.Size.Y;
-        float tabHeight = _tabComponent.GetRequiredHeight();
         float footerHeight = 25;
-        
+        float terminalHeight = _terminal.IsVisible ? _terminal.Height : 0;
         float explorerWidth = _explorer.IsVisible ? _explorer.Width : 0;
-        
+        float tabHeight = _tabComponent.GetRequiredHeight();
+
         _explorer.Bounds = new SKRect(0, 0, explorerWidth, height - footerHeight);
         _explorer.Render(canvas);
 
@@ -614,8 +723,16 @@ public class WindowManager : IDisposable
                 _editor.UpdateSyntax(_currentFilePath);
                 UpdateTitle();
             }
+            
+            if (_terminal.IsVisible)
+            {
+                _terminal.Bounds = new SKRect(explorerWidth, height - footerHeight - terminalHeight, width, height - footerHeight);
+                _terminal.Render(canvas);
+            }
 
-            _editor.Bounds = new SKRect(explorerWidth, tabHeight, width, height - footerHeight);
+            float editorBottom = height - footerHeight - terminalHeight;
+        
+            _editor.Bounds = new SKRect(explorerWidth, tabHeight, width, editorBottom);
             _editor.SetCurrentData(active.Buffer, active.Cursor); 
             _editor.Render(canvas);
         }
@@ -725,11 +842,54 @@ public class WindowManager : IDisposable
 
         UpdateTitle();
     }
-
+    
+    private StandardCursor _lastAppliedCursor = StandardCursor.Default;
+    
     private void OnUpdate(double dt)
     {
         _editor.Update(dt);
+        if (_terminal.IsVisible) _terminal.Update(dt);
+        
+        if (_primaryMouse == null) return;
+        var pos = _primaryMouse.Position;
+        float mx = pos.X;
+        float my = pos.Y;
+        
+        StandardCursor targetCursor = StandardCursor.Default;
+        
+        float explorerWidth = _explorer.IsVisible ? _explorer.Width : 0;
 
+        bool isOverTerminalSplitter = _terminal.IsVisible && 
+                                      Math.Abs(my - _terminal.Bounds.Top) < 15 && 
+                                      mx > explorerWidth;
+
+        bool isOverExplorerSplitter = _explorer.IsVisible && 
+                                      _explorer.IsOnResizeBorder(mx) && 
+                                      (!_terminal.IsVisible || my < _terminal.Bounds.Top);
+
+        if (_terminal.IsResizing || isOverTerminalSplitter)
+        {
+            targetCursor = StandardCursor.VResize;
+        }
+        else if (_isResizingExplorer || isOverExplorerSplitter)
+        {
+            targetCursor = StandardCursor.HResize;
+        }
+        
+        else if (_explorer.IsVisible && _explorer.Bounds.Contains(mx, my))
+        {
+            targetCursor = StandardCursor.Default;
+        }
+        
+        if (targetCursor != _lastAppliedCursor)
+        {
+            _primaryMouse.Cursor.StandardCursor = targetCursor;
+            _lastAppliedCursor = targetCursor;
+        }
+        
+        _primaryMouse.Cursor.StandardCursor = targetCursor;
+        _lastAppliedCursor = targetCursor;
+        
         if (_pendingAction != null)
         {
             var action = _pendingAction;
