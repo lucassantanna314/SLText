@@ -1,5 +1,6 @@
 using SkiaSharp;
 using SLText.Core.Engine;
+using SLText.Core.Engine.Model;
 using SLText.View.Abstractions;
 using SLText.View.Styles;
 
@@ -17,7 +18,16 @@ public class StatusBarComponent : IComponent
     public string LanguageName { get; set; } = "Plain Text";
     public string FileInfo { get; set; } = "New File";
     private readonly EditorComponent _editor;
+    
+    private RunConfiguration? _activeConfiguration;
+    public SKRect PlayButtonBounds { get; private set; }
+    public SKRect SelectorBounds { get; private set; }
 
+    public void SetActiveConfiguration(RunConfiguration? config) 
+    {
+        _activeConfiguration = config;
+    }
+    
     public StatusBarComponent(CursorManager cursor, TextBuffer buffer, EditorComponent editor)
     {
         _cursor = cursor;
@@ -57,9 +67,30 @@ public class StatusBarComponent : IComponent
         _font.GetFontMetrics(out var metrics);
         float textY = Bounds.MidY - (metrics.Ascent + metrics.Descent) / 2;
 
-        // --- LADO ESQUERDO: Contagem de Linhas e LINGUAGEM ---
-        string leftText = $"{_buffer.LineCount} Linhas  |  {LanguageName}  | Font: {_editor.FontSize:0}pt";
+        // --- LADO ESQUERDO ---
+        string leftText = $"{_buffer.LineCount} L  |  {LanguageName}  | {_editor.FontSize:0}pt";
         canvas.DrawText(leftText, Bounds.Left + 15, textY, _font, textPaint);
+
+        // --- SEÇÃO DE EXECUÇÃO ---
+        float runSectionX = Bounds.Left + 220;
+        
+        // Play 
+        using var playPaint = new SKPaint { Color = SKColors.LightGreen, IsAntialias = true };
+        PlayButtonBounds = new SKRect(runSectionX, Bounds.Top + 5, runSectionX + 20, Bounds.Bottom - 5);
+        
+        var path = new SKPath();
+        path.MoveTo(PlayButtonBounds.Left + 4, PlayButtonBounds.Top + 3);
+        path.LineTo(PlayButtonBounds.Left + 4, PlayButtonBounds.Bottom - 3);
+        path.LineTo(PlayButtonBounds.Right - 4, PlayButtonBounds.MidY);
+        path.Close();
+        canvas.DrawPath(path, playPaint);
+
+        // Texto da Configuração
+        string configName = _activeConfiguration?.Name ?? "Select Config...";
+        float nameWidth = _font.MeasureText(configName);
+        SelectorBounds = new SKRect(PlayButtonBounds.Right + 8, Bounds.Top, PlayButtonBounds.Right + 20 + nameWidth, Bounds.Bottom);
+        
+        canvas.DrawText($"{configName} ▾", SelectorBounds.Left, textY, _font, textPaint);
 
         // --- CENTRO: Nome do Arquivo ---
         float fileTextWidth = _font.MeasureText(FileInfo);
@@ -69,6 +100,5 @@ public class StatusBarComponent : IComponent
         string positionText = $"Ln {_cursor.Line + 1}, Col {_cursor.Column + 1}";
         canvas.DrawText(positionText, Bounds.Right - _font.MeasureText(positionText) - 15, textY, _font, textPaint);
     }
-
     public void Update(double deltaTime) { }
 }

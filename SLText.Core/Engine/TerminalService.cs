@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 
 namespace SLText.Core.Engine;
 
@@ -29,7 +30,11 @@ public class TerminalService
         _process = new Process { StartInfo = startInfo };
         _process.Start();
 
-        _input = _process.StandardInput;
+        _input = new StreamWriter(_process.StandardInput.BaseStream, new UTF8Encoding()) 
+        { 
+            AutoFlush = true 
+        };
+        
         _input.AutoFlush = true;
 
         Task.Run(() => ReadStream(_process.StandardOutput));
@@ -77,4 +82,22 @@ public class TerminalService
     {
         SendCommand("\x03");
     }
+    
+    public void Restart(string? workingDirectory = null)
+    {
+        Stop(); 
+        Start(workingDirectory);
+    }
+    
+    public bool IsProcessRunning()
+    {
+        if (_process == null || _process.HasExited) return false;
+
+        try
+        {
+            return !_process.HasExited; 
+        }
+        catch { return false; }
+    }
+
 }

@@ -16,7 +16,7 @@ public class TerminalInstance
     public string CurrentInput { get; set; } = "";
     public int HistoryIndex { get; set; } = -1;
     public float ScrollY { get; set; } = 0;
-    
+    public DateTime LastDataReceived { get; set; } = DateTime.MinValue;
     public bool InitialCleanupDone { get; set; } = false;
     public bool IsInEscape { get; set; } = false;
     public bool IsInOsc { get; set; } = false;
@@ -30,7 +30,7 @@ public class TerminalInstance
 public class TerminalComponent : IComponent
 {
     public SKRect Bounds { get; set; }
-    public bool IsVisible { get; set; } = true;
+    public bool IsVisible { get; set; } = false;
     public float Height { get; set; } = 200;
     
     private readonly SKFont _font;
@@ -63,30 +63,61 @@ public class TerminalComponent : IComponent
         var typeface = File.Exists(fontPath) ? SKTypeface.FromFile(fontPath) : SKTypeface.FromFamilyName("monospace");
         _font = new SKFont(typeface, 13);
         
-        CreateNewTab("bash");
+        CreateNewTab("bash", forceNew: true);
     }
     
-    public void CreateNewTab(string title)
+    public TerminalInstance CreateNewTab(string title, string? workingDirectory = null, bool forceNew = false)
     {
-        string folderName = !string.IsNullOrEmpty(_currentWorkingDirectory) 
-            ? Path.GetFileName(_currentWorkingDirectory) 
-            : title;
+        lock(_terminals)
+        {
+            if (!forceNew)
+            {
+                var existing = _terminals.FirstOrDefault(t => t.Title == title);
+            
+                if (existing != null)
+                {
+                    _activeTabIndex = _terminals.IndexOf(existing);
+                    lock(existing.OutputLines)
+                    {
+                        existing.OutputLines.Clear();
+                        existing.OutputLines.Add("");
+                    }
+                    existing.Service.Restart(workingDirectory ?? _currentWorkingDirectory);
+                    existing.InitialCleanupDone = false;
+                    existing.LastDataReceived = DateTime.MinValue; 
+                    return existing;
+                }
+            }
+        }
+
+        string finalTitle = title;
+    
+        if (title == "bash")
+        {
+            string folderName = !string.IsNullOrEmpty(_currentWorkingDirectory) 
+                ? Path.GetFileName(_currentWorkingDirectory.TrimEnd(Path.DirectorySeparatorChar)) 
+                : "bash";
         
-        string tabTitle = $"{folderName} ({_terminals.Count + 1})";
-        var terminal = new TerminalInstance(tabTitle);
-        
+            int count = _terminals.Count(t => t.Title.Contains(folderName)) + 1;
+            finalTitle = $"{folderName} ({count})";
+        }
+    
+        var terminal = new TerminalInstance(finalTitle);
         terminal.Service.OnDataReceived += (data) => ProcessTerminalData(terminal, data);
-        terminal.Service.Start(_currentWorkingDirectory);
-        
+        terminal.Service.Start(workingDirectory ?? _currentWorkingDirectory);
+    
         lock(_terminals)
         {
             _terminals.Add(terminal);
             _activeTabIndex = _terminals.Count - 1;
         }
+        return terminal;
     }
 
     private void ProcessTerminalData(TerminalInstance term, string data)
     {
+        term.LastDataReceived = DateTime.Now;
+        
         lock (term.OutputLines)
         {
             for (int i = 0; i < data.Length; i++)
@@ -301,22 +332,38 @@ public class TerminalComponent : IComponent
 
         for (int i = 0; i < _terminals.Count; i++)
         {
+            var term = _terminals[i];
             bool isActive = i == _activeTabIndex;
             var tabRect = new SKRect(currentX, Bounds.Top, currentX + TabWidth, Bounds.Top + TabHeight);
 
             using var tabP = new SKPaint { Color = isActive ? _theme.Background : SKColors.Transparent };
             canvas.DrawRect(tabRect, tabP);
 
+            bool isBusy = (DateTime.Now - term.LastDataReceived).TotalSeconds < 2;
+
+            if (isBusy)
+            {
+                using var activePaint = new SKPaint 
+                { 
+                    Color = SKColors.LightGreen.WithAlpha((byte)(_cursorVisible ? 255 : 150)), 
+                    IsAntialias = true,
+                    Style = SKPaintStyle.Fill
+                };
+            
+                canvas.DrawCircle(tabRect.Left + 10, tabRect.MidY, 3.5f, activePaint);
+            }
+
             using var textP = new SKPaint { 
                 Color = isActive ? _theme.Foreground : _theme.Foreground.WithAlpha(150), 
                 IsAntialias = true,
                 TextSize = _font.Size
             };
-        
-            string title = _terminals[i].Title;
+    
+            string title = term.Title;
             if (title.Length > 10) title = title.Substring(0, 8) + "..";
         
-            canvas.DrawText(title, tabRect.Left + 10, tabRect.MidY + 5, _font, textP);
+            float textOffsetX = isBusy ? 22 : 12;
+            canvas.DrawText(title, tabRect.Left + textOffsetX, tabRect.MidY + 5, _font, textP);
 
             canvas.DrawText("×", tabRect.Right - 20, tabRect.MidY + 5, _font, textP);
 
@@ -399,7 +446,7 @@ public class TerminalComponent : IComponent
             float plusBtnStart = _terminals.Count * (TabWidth + 1);
             if (relX > plusBtnStart && relX < plusBtnStart + 40)
             {
-                CreateNewTab("bash");
+                CreateNewTab("bash", forceNew: true);
             }
             return;
         }

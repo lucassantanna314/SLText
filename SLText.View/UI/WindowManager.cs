@@ -4,7 +4,9 @@ using SkiaSharp;
 using SLText.Core.Engine;
 using SLText.View.Components;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using Silk.NET.Core;
+using SLText.Core.Engine.Model;
 using SLText.View.Services;
 using SLText.View.Styles;
 using SLText.View.UI.Input;
@@ -48,6 +50,10 @@ public class WindowManager : IDisposable
     private TerminalComponent _terminal;
     private bool _isTerminalFocused = false;
     private IMouse? _primaryMouse;
+
+    private RunService _runService = new();
+    private RunConfiguration? _activeConfiguration;
+    private string _lastDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
     private void ApplyTheme(EditorTheme theme)
     {
@@ -121,9 +127,11 @@ public class WindowManager : IDisposable
         
                 if (!string.IsNullOrEmpty(folder)) 
                 {
+                    _lastDirectory = folder;
                     _explorer.SetRootDirectory(folder);
                     _explorer.IsVisible = true;
                     _terminal.SetWorkingDirectory(folder);
+                    _runService.ScanProject(folder);
                 }
             }
         };
@@ -158,12 +166,48 @@ public class WindowManager : IDisposable
                 _inputHandler.HandleCopy();
             }
         };
+        
+        _inputHandler.OnRunRequested += () => {
+            ExecuteActiveConfiguration();
+        };
+
+        _inputHandler.OnRunConfigurationSelectorRequested += () => {
+            OpenRunConfigurationSelector();
+        };
+
+        _inputHandler.OnStopRequested += () => {
+            _terminal.ShutdownAllTerminals(); 
+        };
+        
+        _editor.OnRunTestRequested += (line) => 
+        {
+            HandleRunTest(line);
+        };
     }
     
     private void OnWindowClosing()
     {
         _terminal.ShutdownAllTerminals();
         Console.WriteLine("Aplicação e sub-processos encerrados com sucesso.");
+    }
+    
+    private void HandleRunTest(int lineNumber)
+    {
+        string codeLine = _buffer.GetLine(lineNumber + 1); 
+    
+        var match = Regex.Match(codeLine, @"(class|void|Task)\s+([\w\d_]+)");
+        if (!match.Success) return;
+
+        string identifier = match.Groups[2].Value;
+
+        var testConfig = new RunConfiguration
+        {
+            Name = $"Test: {identifier}",
+            Command = $"dotnet test --filter FullyQualifiedName~{identifier}",
+            WorkingDirectory = _lastDirectory 
+        };
+
+        RunSingleConfig(testConfig);
     }
     
     public void OpenSearch() 
@@ -263,7 +307,20 @@ public class WindowManager : IDisposable
             {
                 var pos = m.Position; 
                 float explorerWidth = _explorer.IsVisible ? _explorer.Width : 0;
-              
+                
+                
+                if (_statusBar.SelectorBounds.Contains(pos.X, pos.Y))
+                {
+                    OpenRunConfigurationSelector();
+                    return;
+                }
+
+                if (_statusBar.PlayButtonBounds.Contains(pos.X, pos.Y))
+                {
+                    ExecuteActiveConfiguration();
+                    return;
+                }
+                
                 if (_terminal.IsVisible && _terminal.Bounds.Contains(pos.X, pos.Y))
                 {
                     _isTerminalFocused = true; 
@@ -514,6 +571,51 @@ public class WindowManager : IDisposable
         }
         
         ApplyTheme(EditorTheme.Dark);
+    }
+    
+    private void OpenRunConfigurationSelector()
+    {
+        _commandPalette.IsVisible = true;
+    
+        var runCommands = _runService.Configurations.Select(config => new EditorCommand(
+            config.Name,
+            "Run Configuration",
+            () => {
+                _activeConfiguration = config;
+                _statusBar.SetActiveConfiguration(config);
+                _commandPalette.IsVisible = false;
+                ExecuteActiveConfiguration(); 
+            }
+        )).ToList();
+
+        _commandPalette.LoadCommands(runCommands);
+    }
+    
+    private void ExecuteActiveConfiguration()
+    {
+        var config = _activeConfiguration; 
+        if (config == null) return;
+
+        if (config.Type == RunType.Compound)
+        {
+            foreach (var childId in config.ChildrenIds)
+            {
+                var child = _runService.Configurations.FirstOrDefault(c => c.Id == childId);
+                if (child != null) RunSingleConfig(child);
+            }
+        }
+        else
+        {
+            RunSingleConfig(config);
+        }
+    }
+    
+    private async void RunSingleConfig(RunConfiguration config)
+    {
+        _terminal.IsVisible = true;
+        var tab = _terminal.CreateNewTab(config.Name, config.WorkingDirectory);
+        await Task.Delay(600);
+        tab.Service.SendCommand(config.Command + "\n");
     }
     
     private void UpdateTitle()
