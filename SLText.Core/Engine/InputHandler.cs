@@ -30,6 +30,11 @@ public class InputHandler
     public event Action? OnOpenFolderRequested;
     public event Action? OnFocusExplorerSearchRequested;
     public event Action? OnThemeToggleRequested;
+    public event Action? OnNewTerminalTabRequested;
+    public event Action? OnTerminalInterruptRequested;
+    public event Action? OnRunConfigurationSelectorRequested;
+    public event Action? OnRunRequested;
+    public event Action? OnStopRequested;
     
     private readonly Dictionary<char, char> _pairs = new()
     {
@@ -92,6 +97,21 @@ public class InputHandler
         
         _immediateShortcuts.Add((true, false, "T"), () => new AnonymousCommand(() => OnThemeToggleRequested?.Invoke()));
         
+        _immediateShortcuts.Add((true, true, "T"), () => new AnonymousCommand(() => {
+            OnNewTerminalTabRequested?.Invoke();
+        }));
+        
+        _immediateShortcuts.Add((true, true, "C"), () => new AnonymousCommand(() => {
+            OnTerminalInterruptRequested?.Invoke();
+        }));
+        
+        //roda a play build
+        _immediateShortcuts.Add((false, false, "F5"), () => new AnonymousCommand(() => OnRunRequested?.Invoke()));
+        //seletor templete
+        _immediateShortcuts.Add((true, false, "F5"), () => new AnonymousCommand(() => OnRunConfigurationSelectorRequested?.Invoke()));
+        // stop build
+        _immediateShortcuts.Add((true, true, "F5"), () => new AnonymousCommand(() => OnStopRequested?.Invoke()));
+        
         // --- COMANDOS COM HISTÓRICO ---
         _undoableShortcuts.Add((false, false, "Tab"), () => new InsertTabCommand(_buffer, _cursor));
         _undoableShortcuts.Add((false, false, "Enter"), () => new EnterCommand(_buffer, _cursor, _currentFilePath));        
@@ -136,6 +156,8 @@ public class InputHandler
         commands.Add(new EditorCommand("View", "Zoom In", () => OnZoomRequested?.Invoke(1f), "Ctrl++"));
         commands.Add(new EditorCommand("View", "Zoom Out", () => OnZoomRequested?.Invoke(-1f), "Ctrl+-"));
         commands.Add(new EditorCommand("View", "Reset Zoom", () => OnZoomRequested?.Invoke(0), "Ctrl+0"));
+        
+        commands.Add(new EditorCommand("View", "Toggle Terminal", () => OnNewTerminalTabRequested?.Invoke(), "Ctrl+Shift+T"));
 
         // busca
         commands.Add(new EditorCommand("Search", "Find in File",
@@ -155,6 +177,11 @@ public class InputHandler
             () => _immediateShortcuts[(true, false, "L")]().Execute(), "Ctrl+L"));
         
         commands.Add(new EditorCommand("View", "Toggle Light/Dark Theme", () => OnThemeToggleRequested?.Invoke(), "Ctrl+T"));
+        
+        //run
+        commands.Add(new EditorCommand("Run", "Run Configuration", () => OnRunRequested?.Invoke(), "F5"));
+        commands.Add(new EditorCommand("Run", "Select Run Template...", () => OnRunConfigurationSelectorRequested?.Invoke(), "Ctrl+F5"));
+        commands.Add(new EditorCommand("Run", "Stop Execution", () => OnStopRequested?.Invoke(), "Ctrl+Shift+F5"));
         
         return commands;
     }

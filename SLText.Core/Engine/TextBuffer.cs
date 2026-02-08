@@ -182,4 +182,12 @@ public class TextBuffer
     
         if (_lines.Count == 0) _lines.Add(new List<char>());
     }
+    
+    public string GetLine(int index)
+    {
+        if (index < 0 || index >= _lines.Count) 
+            return string.Empty;
+        
+        return new string(_lines[index].ToArray());
+    }
 }

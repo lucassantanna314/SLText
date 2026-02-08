@@ -1,4 +1,6 @@
+using System.Text.RegularExpressions;
 using SkiaSharp;
+using SLText.Core.Engine;
 using SLText.View.Styles;
 
 namespace SLText.View.Components.Canvas;
@@ -9,7 +11,7 @@ public class GutterRenderer
     private EditorTheme _theme;
     private readonly SKPaint _backgroundPaint = new() { IsAntialias = true };
     private readonly SKPaint _textPaint = new() { IsAntialias = true };
-
+    private static readonly Regex TestAttributeRegex = new Regex(@"\[(Test|Fact|TestMethod|TestClass)\]", RegexOptions.Compiled);
     public GutterRenderer(SKFont font, EditorTheme theme)
     {
         _font = font;
@@ -36,7 +38,7 @@ public class GutterRenderer
         return _font.MeasureText(maxLineStr) + gutterPadding;
     }
     
-    public void Render(SKCanvas canvas, SKRect bounds, List<int> visibleLineNumbers, float lineHeight, float scrollY)
+    public void Render(SKCanvas canvas, SKRect bounds, List<int> visibleLineNumbers, float lineHeight, float scrollY, TextBuffer buffer)
     {
         int maxLineNumber = visibleLineNumbers.Count > 0 ? visibleLineNumbers[^1] : 0;
         float width = GetWidth(maxLineNumber);
@@ -55,6 +57,15 @@ public class GutterRenderer
             float yPos = bounds.Top + (lineIndex * lineHeight) - scrollY;
 
             if (yPos < bounds.Top - lineHeight) continue;
+            
+            string lineContent = buffer.GetLine(lineIndex);
+            if (lineContent.Contains("[Fact]") || lineContent.Contains("[Test]") || lineContent.Contains("[TestMethod]"))
+            {
+                float iconX = bounds.Left + 8;
+                float iconY = yPos + (lineHeight / 2);
+                DrawPlayIcon(canvas, iconX, iconY);
+            }
+            
             if (yPos > bounds.Bottom) break;
 
             string lineStr = lineNum.ToString();
@@ -65,6 +76,20 @@ public class GutterRenderer
         }
 
         canvas.Restore();
+    }
+    
+    private void DrawPlayIcon(SKCanvas canvas, float x, float y)
+    {
+        using var paint = new SKPaint { Color = SKColors.LightGreen, IsAntialias = true };
+        float size = 12;
+    
+        var path = new SKPath();
+        path.MoveTo(x, y - (size / 2));
+        path.LineTo(x, y + (size / 2));
+        path.LineTo(x + size, y);
+        path.Close();
+    
+        canvas.DrawPath(path, paint);
     }
 
 }

@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using SkiaSharp;
 using SLText.Core.Engine;
 using SLText.Core.Engine.Model;
@@ -40,6 +41,9 @@ public class EditorComponent : IComponent, IZoomable
     private bool _isDraggingHorizontal;
     private float _lastMouseY;
     private float _lastMouseX;
+    
+    public event Action<int>? OnRunTestRequested;
+    private static readonly Regex TestAttributeRegex = new Regex(@"\[(Test|Fact|TestMethod|TestClass)\]", RegexOptions.Compiled);
 
     public EditorComponent(TextBuffer buffer, CursorManager cursor)
     {
@@ -78,8 +82,8 @@ public class EditorComponent : IComponent, IZoomable
 
         var visibleLineNumbers = Enumerable.Range(1, lines.Count).ToList();
 
-        _gutterRenderer.Render(canvas, Bounds, visibleLineNumbers, _lineHeight, _viewport.ScrollY);
-
+        _gutterRenderer.Render(canvas, Bounds, visibleLineNumbers, _lineHeight, _viewport.ScrollY, _buffer);
+        
         canvas.Save();
         var contentClip = new SKRect(Bounds.Left + gutterWidth, Bounds.Top, Bounds.Right, Bounds.Bottom);
         canvas.ClipRect(contentClip);
@@ -219,6 +223,17 @@ public class EditorComponent : IComponent, IZoomable
 
     public void HandleGutterClick(float x, float y)
     {
+        float gutterWidth = _gutterRenderer.GetWidth(_buffer.LineCount);
+        if (x < Bounds.Left + 30) 
+        {
+            var (line, _) = GetTextPositionFromMouse(x, y);
+            string lineContent = _buffer.GetLine(line);
+
+            if (TestAttributeRegex.IsMatch(lineContent))
+            {
+                OnRunTestRequested?.Invoke(line); 
+            }
+        }
         EnsureCursorVisible();
     }
 
@@ -316,8 +331,6 @@ public class EditorComponent : IComponent, IZoomable
     }
 
     public void RequestScrollToCursor() => _needScrollToCursor = true;
-    public float LineHeight => _lineHeight;
-    public int GetTotalLines() => _buffer.LineCount;
 
     private void RenderSelection(SKCanvas canvas, int lineIndex, float yPos, float gutterWidth, SKFontMetrics metrics)
     {
