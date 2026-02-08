@@ -120,6 +120,8 @@ public class TerminalComponent : IComponent
         
         lock (term.OutputLines)
         {
+            if (OperatingSystem.IsWindows()) term.InitialCleanupDone = true;
+            
             for (int i = 0; i < data.Length; i++)
             {
                 char c = data[i];
