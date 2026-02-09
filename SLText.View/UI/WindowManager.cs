@@ -58,6 +58,10 @@ public class WindowManager : IDisposable
     private TerminalComponent _terminal;
     private bool _isTerminalFocused = false;
     private IMouse? _primaryMouse;
+    
+    private LspService _lspService = new();
+    private AutocompleteComponent _autocomplete;
+    private CancellationTokenSource? _diagnosticCts;
 
     private RunService _runService = new();
     private RunConfiguration? _activeConfiguration;
@@ -99,7 +103,8 @@ public class WindowManager : IDisposable
         _tabManager.AddTab(buffer, cursor, initialFilePath);
         _editor = new EditorComponent(_tabManager.ActiveTab!.Buffer, _tabManager.ActiveTab.Cursor);
         _terminal = new TerminalComponent();
-
+        _autocomplete = new AutocompleteComponent(_editor.Font);
+        
         _currentFilePath = initialFilePath;
 
         _window.Load += OnLoad;
@@ -144,6 +149,9 @@ public class WindowManager : IDisposable
                     _explorer.IsVisible = true;
                     _terminal.SetWorkingDirectory(folder);
                     _runService.ScanProject(folder);
+                    if (!string.IsNullOrEmpty(folder)) {
+                        Task.Run(() => _lspService.LoadProjectFiles(folder)); 
+                    }
                 }
             }
         };
@@ -273,8 +281,10 @@ public class WindowManager : IDisposable
             keyboard.KeyUp += (k, key, scancode) => {
                 if (key == _lastPressedKey) _lastPressedKey = null;
             };
+            
+            
 
-            keyboard.KeyChar += (k, c) =>
+            keyboard.KeyChar += async (k, c) =>
             {
                 if (_commandPalette.IsVisible)
                 {
@@ -320,6 +330,70 @@ public class WindowManager : IDisposable
                 _inputHandler.HandleTextInput(c);
 
                 if (!activeTab.IsDirty) { activeTab.IsDirty = true; UpdateTitle(); }
+                
+                _diagnosticCts?.Cancel();
+                _diagnosticCts = new CancellationTokenSource();
+                var token = _diagnosticCts.Token;
+            
+                _ = Task.Run(async () => 
+                {
+                    try 
+                    {
+                        await Task.Delay(600, token); 
+
+                        string code = _buffer.GetAllText();
+                        var diagnostics = await _lspService.GetDiagnosticsAsync(code, _currentFilePath);
+
+                        _editor.SetDiagnostics(diagnostics);
+                    }
+                    catch (TaskCanceledException) { /*  */ }
+                    catch (Exception ex) { Console.WriteLine($"Erro ao buscar diagnósticos: {ex.Message}"); }
+                }, token);
+                
+                try 
+                {
+                    if (char.IsLetterOrDigit(c) || c == '.' || c == '_')
+                    {
+                        var pos = _editor.GetCursorScreenPosition();
+                        int flatOffset = _buffer.GetFlatOffset(_cursor.Line, _cursor.Column);
+                        string allText = _buffer.GetAllText();
+
+                        string partialWord = GetPartialWord(_buffer.GetLine(_cursor.Line), _cursor.Column);
+
+                        // 2. Chama o LSP
+                        string path = _currentFilePath ?? "new_file.cs";
+                        var completions = await _lspService.GetCompletionsAsync(allText, flatOffset, path);
+
+                        if (completions != null && completions.Any())
+                        {
+                            var filtered = completions
+                                .Select(i => i.DisplayText)
+                                .Where(text => text.StartsWith(partialWord, StringComparison.OrdinalIgnoreCase))
+                                .ToList();
+
+                            if (filtered.Any())
+                            {
+                                _autocomplete.Show(pos.x, pos.y + 20, filtered); 
+                            }
+                            else
+                            {
+                                _autocomplete.IsVisible = false;
+                            }
+                        }
+                        else
+                        {
+                            _autocomplete.IsVisible = false;
+                        }
+                    }
+                    else
+                    {
+                        _autocomplete.IsVisible = false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"UI Completion Dispatch Error: {ex.Message}");
+                }
             };
         }
 
@@ -596,6 +670,54 @@ public class WindowManager : IDisposable
 
         ApplyTheme(EditorTheme.Dark);
     }
+    
+    private void ApplyAutocomplete()
+    {
+        var item = _autocomplete.GetCurrentItem(); 
+        if (string.IsNullOrEmpty(item)) return;
+
+        var activeTab = _tabManager.ActiveTab;
+        if (activeTab == null) return;
+
+        string currentLine = activeTab.Buffer.GetLine(activeTab.Cursor.Line);
+        string partialWord = GetPartialWord(currentLine, activeTab.Cursor.Column);
+
+        if (partialWord.Length > 0)
+        {
+            for(int i = 0; i < partialWord.Length; i++) 
+                activeTab.Cursor.MoveLeft();
+          
+            for(int i=0; i < partialWord.Length; i++) 
+                activeTab.Buffer.Delete(activeTab.Cursor.Line, activeTab.Cursor.Column);
+        }
+
+        activeTab.Buffer.Insert(activeTab.Cursor.Line, activeTab.Cursor.Column, item);
+    
+        for(int i = 0; i < item.Length; i++) 
+            activeTab.Cursor.MoveRight();
+       
+
+        _autocomplete.IsVisible = false;
+        _window.DoRender(); 
+    }
+    
+    private string GetPartialWord(string line, int column)
+    {
+        if (string.IsNullOrEmpty(line) || column == 0) return "";
+
+        int start = column - 1;
+        while (start >= 0)
+        {
+            char c = line[start];
+            if (!char.IsLetterOrDigit(c) && c != '_') 
+            {
+                break; 
+            }
+            start--;
+        }
+    
+        return line.Substring(start + 1, column - (start + 1));
+    }
 
     private void OpenRunConfigurationSelector()
     {
@@ -659,6 +781,32 @@ public class WindowManager : IDisposable
 
     private void OnKeyDown(IKeyboard k, Key key, int arg3)
     {
+        if (_autocomplete.IsVisible)
+        {
+            if (key == Key.Up) 
+            { 
+                _autocomplete.MoveSelection(-1); 
+                return; 
+            }
+            if (key == Key.Down) 
+            { 
+                _autocomplete.MoveSelection(1); 
+                return; 
+            }
+
+            if (key == Key.Tab || key == Key.Enter)
+            {
+                ApplyAutocomplete();
+                return; 
+            }
+
+            if (key == Key.Escape) 
+            { 
+                _autocomplete.IsVisible = false; 
+                return; 
+            }
+        }
+        
         if (IsNavigationOnly(key) || key == Key.Backspace || key == Key.Delete)
         {
             _lastPressedKey = key;
@@ -900,6 +1048,11 @@ public class WindowManager : IDisposable
             _commandPalette.ApplyTheme(_currentTheme);
             _commandPalette.Render(canvas);
         }
+        
+        if (_autocomplete.IsVisible)
+        {
+            _autocomplete.Render(canvas, _currentTheme);
+        }
 
         _grContext.Flush();
     }
@@ -1058,7 +1211,19 @@ public class WindowManager : IDisposable
 
     private void SetupSurface()
     {
-        var target = new GRBackendRenderTarget(_window.Size.X, _window.Size.Y, 0, 8, new GRGlFramebufferInfo(0, 0x8058));
+        if (_surface != null)
+        {
+            _surface.Dispose();
+            _surface = null;
+        }
+
+        if (_grContext == null) return;
+
+        var width = Math.Max(1, _window.Size.X);
+        var height = Math.Max(1, _window.Size.Y);
+        
+        var target = new GRBackendRenderTarget(width, height, 0, 8, new GRGlFramebufferInfo(0, 0x8058)); // 0x8058 = GL_RGBA8
+    
         _surface = SKSurface.Create(_grContext, target, GRSurfaceOrigin.BottomLeft, SKColorType.Rgba8888);
     }
 

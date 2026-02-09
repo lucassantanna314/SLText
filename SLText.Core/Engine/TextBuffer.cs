@@ -14,7 +14,7 @@ public class TextBuffer
     public IEnumerable<string> GetLines() => 
         _lines.Select(l => new string(l.ToArray()));
 
-    public string GetAllText() => string.Join(Environment.NewLine, GetLines());
+    public string GetAllText() => string.Join("\n", GetLines());
     
     public List<SearchResult> SearchAll(string term)
     {
@@ -64,6 +64,17 @@ public class TextBuffer
         }
 
         return null;
+    }
+    
+    public int GetFlatOffset(int line, int column)
+    {
+        int offset = 0;
+        for (int i = 0; i < line && i < _lines.Count; i++)
+        {
+            offset += _lines[i].Count + 1; 
+        }
+        offset += column;
+        return offset;
     }
 
     public void Insert(int line, int column, char c)
