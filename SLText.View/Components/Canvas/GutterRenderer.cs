@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Microsoft.CodeAnalysis;
 using SkiaSharp;
 using SLText.Core.Engine;
 using SLText.View.Styles;
@@ -12,6 +13,7 @@ public class GutterRenderer
     private readonly SKPaint _backgroundPaint = new() { IsAntialias = true };
     private readonly SKPaint _textPaint = new() { IsAntialias = true };
     private static readonly Regex TestAttributeRegex = new Regex(@"\[(Test|Fact|TestMethod|TestClass)\]", RegexOptions.Compiled);
+    private List<Diagnostic> _diagnostics = new();
     public GutterRenderer(SKFont font, EditorTheme theme)
     {
         _font = font;
@@ -24,6 +26,8 @@ public class GutterRenderer
         _theme = theme;
         UpdatePaints();
     }
+    
+    public void SetDiagnostics(List<Diagnostic> diags) => _diagnostics = diags;
 
     private void UpdatePaints()
     {
@@ -58,10 +62,21 @@ public class GutterRenderer
 
             if (yPos < bounds.Top - lineHeight) continue;
             
+            bool hasMissingReference = _diagnostics.Any(d => 
+                d.Location.GetLineSpan().StartLinePosition.Line == lineIndex && 
+                d.Id == "CS0246");
+
+            if (hasMissingReference)
+            {
+                float iconX = bounds.Left + 5;
+                float iconY = yPos + (lineHeight / 2);
+                DrawLightBulb(canvas, iconX, iconY);
+            }
+            
             string lineContent = buffer.GetLine(lineIndex);
             if (lineContent.Contains("[Fact]") || lineContent.Contains("[Test]") || lineContent.Contains("[TestMethod]"))
             {
-                float iconX = bounds.Left + 8;
+                float iconX = bounds.Left + 20;
                 float iconY = yPos + (lineHeight / 2);
                 DrawPlayIcon(canvas, iconX, iconY);
             }
@@ -90,6 +105,15 @@ public class GutterRenderer
         path.Close();
     
         canvas.DrawPath(path, paint);
+    }
+    
+    private void DrawLightBulb(SKCanvas canvas, float x, float y)
+    {
+        using var paint = new SKPaint { Color = SKColors.Yellow, IsAntialias = true, Style = SKPaintStyle.Fill };
+        canvas.DrawCircle(x + 5, y, 4, paint);
+        
+        using var stroke = new SKPaint { Color = SKColors.DarkGoldenrod, IsAntialias = true, Style = SKPaintStyle.Stroke };
+        canvas.DrawCircle(x + 5, y, 4, stroke);
     }
 
 }

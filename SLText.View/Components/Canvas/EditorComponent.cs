@@ -45,6 +45,7 @@ public class EditorComponent : IComponent, IZoomable
     private float _lastMouseX;
     
     public event Action<int>? OnRunTestRequested;
+    public event Action<int, string>? OnQuickFixRequested;
     private static readonly Regex TestAttributeRegex = new Regex(@"\[(Test|Fact|TestMethod|TestClass)\]", RegexOptions.Compiled);
     
     private List<Diagnostic> _diagnostics = new();
@@ -52,18 +53,19 @@ public class EditorComponent : IComponent, IZoomable
     public void SetDiagnostics(List<Diagnostic> diagnostics) 
     {
         _diagnostics = diagnostics;
-        if (diagnostics.Any())
-        {
-            Console.WriteLine($"\n--- [RELATÓRIO LSP] {diagnostics.Count} Erros Encontrados ---");
+        _gutterRenderer.SetDiagnostics(diagnostics);
+        //if (diagnostics.Any())
+        //{
+        //    Console.WriteLine($"\n--- [RELATÓRIO LSP] {diagnostics.Count} Erros Encontrados ---");
             
-            foreach (var diag in diagnostics)
-            {
-                var line = diag.Location.GetLineSpan().StartLinePosition.Line + 1;
-                Console.WriteLine($"   🔴 [{diag.Id}] Linha {line}: {diag.GetMessage()}");
-            }
+        //    foreach (var diag in diagnostics)
+        //    {
+        //        var line = diag.Location.GetLineSpan().StartLinePosition.Line + 1;
+        //        Console.WriteLine($"   🔴 [{diag.Id}] Linha {line}: {diag.GetMessage()}");
+         //   }
         
-            Console.WriteLine("----------------------------------------------------------\n");
-        }
+        //    Console.WriteLine("----------------------------------------------------------\n");
+       // }
     }
     
     public EditorComponent(TextBuffer buffer, CursorManager cursor)
@@ -282,14 +284,28 @@ public class EditorComponent : IComponent, IZoomable
     public void HandleGutterClick(float x, float y)
     {
         float gutterWidth = _gutterRenderer.GetWidth(_buffer.LineCount);
-        if (x < Bounds.Left + 30) 
+        
+        if (x < Bounds.Left + gutterWidth)
         {
             var (line, _) = GetTextPositionFromMouse(x, y);
+            
             string lineContent = _buffer.GetLine(line);
-
             if (TestAttributeRegex.IsMatch(lineContent))
             {
                 OnRunTestRequested?.Invoke(line); 
+                return;
+            }
+            
+            var error = _diagnostics.FirstOrDefault(d => 
+                d.Location.GetLineSpan().StartLinePosition.Line == line && 
+                d.Id == "CS0246");
+            
+            if (error != null)
+            {
+                var span = error.Location.SourceSpan;
+                string textWithError = _buffer.GetTextInRange(span.Start, span.Length);
+                
+                OnQuickFixRequested?.Invoke(line, textWithError);
             }
         }
         EnsureCursorVisible();

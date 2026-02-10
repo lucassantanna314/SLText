@@ -35,6 +35,7 @@ public class InputHandler
     public event Action? OnRunConfigurationSelectorRequested;
     public event Action? OnRunRequested;
     public event Action? OnStopRequested;
+    public event Action? OnReloadProjectRequested;
     
     private readonly Dictionary<char, char> _pairs = new()
     {
@@ -135,7 +136,8 @@ public class InputHandler
             "Ctrl+O"));
         commands.Add(new EditorCommand("File", "Open Folder", () => OnOpenFolderRequested?.Invoke(), "Ctrl+Shift+O"));
         commands.Add(new EditorCommand("File", "Save", () => _saveCommand.Execute(), "Ctrl+S"));
-
+        commands.Add(new EditorCommand("File", "Reload Project References", () => OnReloadProjectRequested?.Invoke(), ""));
+        
         // edit
         commands.Add(new EditorCommand("Edit", "Undo", () => _undoManager.Undo(), "Ctrl+Z"));
         commands.Add(new EditorCommand("Edit", "Redo", () => _undoManager.Redo(), "Ctrl+Y"));

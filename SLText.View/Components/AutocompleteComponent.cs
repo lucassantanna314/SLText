@@ -84,6 +84,23 @@ public class AutocompleteComponent
             DrawScrollbar(canvas, theme, visibleCount);
         }
     }
+    
+    public bool SelectIndexByMouseY(float mouseY)
+    {
+        if (!IsVisible) return false;
+
+        float relativeY = mouseY - Bounds.Top;
+        int visibleIndexClicked = (int)(relativeY / ItemHeight);
+    
+        int actualIndex = _scrollIndex + visibleIndexClicked;
+
+        if (actualIndex >= 0 && actualIndex < _items.Count)
+        {
+            _selectedIndex = actualIndex;
+            return true;
+        }
+        return false;
+    }
 
     private void DrawScrollbar(SKCanvas canvas, EditorTheme theme, int visibleCount)
     {

@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Microsoft.CodeAnalysis;
 using Silk.NET.Input;
 using SkiaSharp;
 using SLText.Core.Engine;
@@ -20,6 +21,7 @@ public class TerminalInstance
     public bool InitialCleanupDone { get; set; } = false;
     public bool IsInEscape { get; set; } = false;
     public bool IsInOsc { get; set; } = false;
+    public bool IsReadOnly { get; set; } = false;
 
     public TerminalInstance(string title)
     {
@@ -66,6 +68,89 @@ public class TerminalComponent : IComponent
         CreateNewTab("bash", forceNew: true);
     }
     
+    public void ShowDiagnostics(List<Diagnostic> diagnostics, string fileName)
+    {
+        if (diagnostics.Any() && !IsVisible) IsVisible = true;
+
+        TerminalInstance? problemsTab;
+        lock (_terminals)
+        {
+            problemsTab = _terminals.FirstOrDefault(t => t.Title == "Problems");
+            if (problemsTab == null)
+            {
+                problemsTab = new TerminalInstance("Problems") { IsReadOnly = true };
+                _terminals.Insert(0, problemsTab); 
+            }
+        }
+
+        lock (problemsTab.OutputLines)
+        {
+            problemsTab.OutputLines.Clear();
+            problemsTab.OutputLines.Add(""); 
+            
+            problemsTab.OutputLines.Add($"File: {fileName}");
+            problemsTab.OutputLines.Add("----------------------------------------");
+
+            if (diagnostics.Count == 0)
+            {
+                problemsTab.OutputLines.Add(" [SUCCESS] No errors found.");
+            }
+            else
+            {
+                problemsTab.OutputLines.Add($"Found {diagnostics.Count} issues:");
+                problemsTab.OutputLines.Add("");
+
+                foreach (var diag in diagnostics)
+                {
+                    var line = diag.Location.GetLineSpan().StartLinePosition.Line + 1;
+                    string severity = diag.Severity == DiagnosticSeverity.Error ? "[ERROR]" : "[WARN]";
+                    
+                    string message = $" {severity} Line {line}: {diag.GetMessage()} ({diag.Id})";
+                    problemsTab.OutputLines.Add(message);
+                }
+            }
+            problemsTab.OutputLines.Add("");
+            problemsTab.LastDataReceived = DateTime.Now; 
+        }
+    }
+    
+    public void WriteOutput(string tabTitle, string message, bool clearFirst = false)
+    {
+        if (!IsVisible) IsVisible = true;
+
+        TerminalInstance? outputTab;
+        lock (_terminals)
+        {
+            outputTab = _terminals.FirstOrDefault(t => t.Title == tabTitle);
+            if (outputTab == null)
+            {
+                outputTab = new TerminalInstance(tabTitle) { IsReadOnly = true };
+              
+                _terminals.Insert(0, outputTab);
+                _activeTabIndex = 0; 
+            }
+        }
+
+        lock (outputTab.OutputLines)
+        {
+            if (clearFirst)
+            {
+                outputTab.OutputLines.Clear();
+                outputTab.OutputLines.Add(""); 
+            }
+
+            string time = DateTime.Now.ToString("HH:mm:ss");
+            outputTab.OutputLines.Add($"[{time}] {message}");
+            
+            outputTab.LastDataReceived = DateTime.Now;
+        }
+        
+        if (ActiveTerminal == outputTab)
+        {
+            AutoScrollToBottom();
+        }
+    }
+    
     public TerminalInstance CreateNewTab(string title, string? workingDirectory = null, bool forceNew = false)
     {
         lock(_terminals)
@@ -105,7 +190,12 @@ public class TerminalComponent : IComponent
         var terminal = new TerminalInstance(finalTitle);
         terminal.Service.OnDataReceived += (data) => ProcessTerminalData(terminal, data);
         terminal.Service.Start(workingDirectory ?? _currentWorkingDirectory);
-    
+        
+        if (!terminal.IsReadOnly)
+        {
+            terminal.Service.Start(workingDirectory ?? _currentWorkingDirectory);
+        }
+        
         lock(_terminals)
         {
             _terminals.Add(terminal);
@@ -116,6 +206,8 @@ public class TerminalComponent : IComponent
 
     private void ProcessTerminalData(TerminalInstance term, string data)
     {
+        if (term.IsReadOnly) return;
+        
         term.LastDataReceived = DateTime.Now;
         
         lock (term.OutputLines)
@@ -195,6 +287,7 @@ public class TerminalComponent : IComponent
     public void HandleKeyDown(string text)
     {
         var term = ActiveTerminal;
+        if (term == null || term.IsReadOnly) return;
         if (text == "\n" || text == "\r")
         {
             string cmd = term.CurrentInput.Trim().ToLower();
@@ -287,7 +380,7 @@ public class TerminalComponent : IComponent
                 }
             }
 
-            if (_cursorVisible && ActiveTerminal.OutputLines.Count > 0)
+            if (_cursorVisible && !ActiveTerminal.IsReadOnly && ActiveTerminal.OutputLines.Count > 0)
             {
                 string lastLine = ActiveTerminal.OutputLines[^1];
                 float lastLineY = startY + ((ActiveTerminal.OutputLines.Count - 1) * lineHeight);
@@ -393,6 +486,7 @@ public class TerminalComponent : IComponent
     
     public void HandleSpecialKey(Key key) {
         var term = ActiveTerminal;
+        if (term.IsReadOnly) return;
         if (key == Key.Up && term.CommandHistory.Count > 0 && term.HistoryIndex < term.CommandHistory.Count - 1) {
             term.HistoryIndex++;
             ClearCurrentLineAndSet(term.CommandHistory[^(term.HistoryIndex + 1)]);
@@ -492,7 +586,7 @@ public class TerminalComponent : IComponent
         {
             foreach (var terminal in _terminals)
             {
-                terminal.Service.Stop();
+                if(!terminal.IsReadOnly) terminal.Service.Stop();
             }
             _terminals.Clear();
         }
@@ -500,7 +594,7 @@ public class TerminalComponent : IComponent
     
     public void InterruptActiveTerminal()
     {
-        if (_terminals.Count > 0)
+        if (_terminals.Count > 0 && !ActiveTerminal.IsReadOnly)
         {
             ActiveTerminal.Service.SendInterrupt();
         }

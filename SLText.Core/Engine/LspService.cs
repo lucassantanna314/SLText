@@ -10,55 +10,56 @@ public class LspService
 {
     private AdhocWorkspace _workspace;
     private Project _project;
-    private readonly MetadataReference[] _references;
-    private readonly List<MetadataReference> _baseReferences;
+    private readonly Dictionary<string, MetadataReference> _referencesMap = new();
     
     public LspService()
     {
         _workspace = new AdhocWorkspace();
-        _baseReferences = new List<MetadataReference>();
-        var loadedAssemblies = new HashSet<string>();
-        
         var coreDir = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
-
-        foreach (var file in Directory.GetFiles(coreDir, "*.dll"))        {
-            var fileName = Path.GetFileName(file);
+        LoadReferencesFromDirectory(coreDir);
         
-            if (fileName.StartsWith("System.") || 
-                fileName.StartsWith("Microsoft.") || 
-                fileName == "mscorlib.dll" || 
-                fileName == "netstandard.dll")
+        var dotnetRoot = Directory.GetParent(coreDir)?.Parent?.FullName; // Sobe de Microsoft.NETCore.App/Versao para /shared
+        if (dotnetRoot != null)
+        {
+            var aspNetCoreRoot = Path.Combine(dotnetRoot, "Microsoft.AspNetCore.App");
+            if (Directory.Exists(aspNetCoreRoot))
             {
-                try 
+                var latestVersion = Directory.GetDirectories(aspNetCoreRoot)
+                    .OrderByDescending(d => d)
+                    .FirstOrDefault();
+
+                if (latestVersion != null)
                 {
-                    if (loadedAssemblies.Add(fileName)) 
-                    {
-                        _baseReferences.Add(MetadataReference.CreateFromFile(file));
-                    }
+                    LoadReferencesFromDirectory(latestVersion);
+                    Console.WriteLine($"[LSP] ASP.NET Core Framework carregado de: {latestVersion}");
                 }
-                catch { /*  */ }
             }
         }
         
-        //Dlls local
-        var appDir = AppContext.BaseDirectory;
-        foreach (var file in Directory.GetFiles(appDir, "*.dll"))
+        InitProject(_referencesMap.Values);
+    }
+    
+    private void LoadReferencesFromDirectory(string directoryPath)
+    {
+        if (!Directory.Exists(directoryPath)) return;
+
+        foreach (var file in Directory.GetFiles(directoryPath, "*.dll"))
         {
             var fileName = Path.GetFileName(file);
-            if(fileName.Contains("SLText") || loadedAssemblies.Contains(fileName))
-                continue;
-            try
+            
+            if (!_referencesMap.ContainsKey(fileName))
             {
-                if (loadedAssemblies.Add(fileName))
+                try
                 {
-                    _baseReferences.Add(MetadataReference.CreateFromFile(file));
+                    var reference = MetadataReference.CreateFromFile(file);
+                    _referencesMap.Add(fileName, reference);
+                }
+                catch 
+                { 
+                    //
                 }
             }
-            catch { }
-            
         }
-        Console.WriteLine($"[LSP] Base References carregadas: {_baseReferences.Count}");
-        InitProject(_baseReferences);
     }
     
     private void InitProject(IEnumerable<MetadataReference> refs)
@@ -91,13 +92,20 @@ public class LspService
         
         var globalUsingsCode = 
             @"global using System;
-global using System.Collections.Generic;
-global using System.IO;
-global using System.Linq;
-global using System.Text;
-global using System.Threading;
-global using System.Threading.Tasks;
-";
+      global using System.Collections.Generic;
+      global using System.IO;
+      global using System.Linq;
+      global using System.Net.Http;
+      global using System.Threading;
+      global using System.Threading.Tasks;
+      global using Microsoft.AspNetCore.Builder;
+      global using Microsoft.AspNetCore.Hosting;
+      global using Microsoft.AspNetCore.Http;
+      global using Microsoft.AspNetCore.Routing;
+      global using Microsoft.Extensions.Configuration;
+      global using Microsoft.Extensions.DependencyInjection;
+      global using Microsoft.Extensions.Hosting;
+      global using Microsoft.Extensions.Logging;";
         
         var docInfo = DocumentInfo.Create(
             DocumentId.CreateNewId(_project.Id),
@@ -249,41 +257,96 @@ global using System.Threading.Tasks;
         _project = _workspace.CurrentSolution.GetProject(_project.Id)!;
         return _project.Documents.First(d => d.FilePath == safePath);
     }
-
-    public void LoadProjectFiles(string rootPath)
+    
+    public async Task<List<string>> GetTypeNamespacesAsync(string typeName)
     {
-        Console.WriteLine($"[LSP] Escaneando projeto em: {rootPath}");
-        var projectReferences = new List<MetadataReference>(_baseReferences);
-        var loadedNames = new HashSet<string>();
+        if (_project == null) return new List<string>();
+
+        var compilation = await _project.GetCompilationAsync();
+        if (compilation == null) return new List<string>();
+        
+        var results = new HashSet<string>();
+
+        var symbols = compilation.GetSymbolsWithName(typeName, SymbolFilter.Type)
+            .Where(s => s.DeclaredAccessibility == Accessibility.Public);
+
+        foreach (var symbol in symbols)
+        {
+            var ns = symbol.ContainingNamespace.ToDisplayString();
+            if (!string.IsNullOrEmpty(ns) && ns != "<global namespace>")
+                results.Add(ns);
+        }
+        
+        var globalNs = compilation.GlobalNamespace;
+        
+        FindTypeInNamespaceRecursively(globalNs, typeName, results);
+
+        return results.ToList();
+    }
+    
+    private void FindTypeInNamespaceRecursively(INamespaceSymbol currentNamespace, string targetTypeName, HashSet<string> results)
+    {
+        var types = currentNamespace.GetTypeMembers(targetTypeName);
+    
+        if (types.Any(t => t.DeclaredAccessibility == Accessibility.Public))
+        {
+            var nsDisplay = currentNamespace.ToDisplayString();
+            if (!string.IsNullOrEmpty(nsDisplay) && nsDisplay != "<global namespace>")
+            {
+                results.Add(nsDisplay);
+            }
+        }
+
+        foreach (var childNs in currentNamespace.GetNamespaceMembers())
+        {
+            FindTypeInNamespaceRecursively(childNs, targetTypeName, results);
+        }
+    }
+
+    public void LoadProjectFiles(string rootPath, Action<string>? onProgress = null)
+    {
+        onProgress?.Invoke($"Loading: {rootPath}");
+        
+        var csprojFile = Directory.GetFiles(rootPath, "*.csproj", SearchOption.TopDirectoryOnly).FirstOrDefault();
+        string projectAssemblyName = csprojFile != null 
+            ? Path.GetFileNameWithoutExtension(csprojFile) + ".dll" 
+            : "NOME_IMPROVAVEL.dll";
+        
+        var projectReferences = new Dictionary<string, MetadataReference>(_referencesMap);
         
         var potentialDlls = Directory.GetFiles(rootPath, "*.dll", SearchOption.AllDirectories);
+        int dllCount = 0;
         
         foreach (var dllPath in potentialDlls)
         {
-            if (dllPath.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}") || 
-                dllPath.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) // Às vezes refs ficam no obj
+            var fileName = Path.GetFileName(dllPath);
+            
+            if (dllPath.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) 
+                continue;
+            if (fileName.Equals(projectAssemblyName, StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (projectReferences.ContainsKey(fileName)) 
+                continue;
+            
+            try 
             {
-                var fileName = Path.GetFileName(dllPath);
-                
-                bool alreadyLoaded = _baseReferences.Any(r => r.Display != null && Path.GetFileName(r.Display) == fileName);
-                
-                if (!alreadyLoaded && loadedNames.Add(fileName))
-                {
-                    try 
-                    {
-                        projectReferences.Add(MetadataReference.CreateFromFile(dllPath)); 
-                        Console.WriteLine($"[LSP] Referência de projeto encontrada: {fileName}");
-                    }
-                    catch { }
-                }
+                var reference = MetadataReference.CreateFromFile(dllPath);
+                projectReferences[fileName] = reference; 
+                dllCount++;
             }
+            catch { }
         }
         
-        Console.WriteLine($"[LSP] Total de Referências (Base + Projeto): {projectReferences.Count}");
+        onProgress?.Invoke($"Total references (System + AspNet + Project): {_referencesMap.Count}");
         
-        InitProject(projectReferences);
+        InitProject(projectReferences.Values);
         
         var files = Directory.GetFiles(rootPath, "*.cs", SearchOption.AllDirectories);
+        int fileCount = 0;
+        int totalFiles = files.Length;
+        
+        onProgress?.Invoke($"Found {totalFiles} files .cs. Starting analysis...");
+        
         foreach (var file in files)
         {
             if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") ||
@@ -306,71 +369,82 @@ global using System.Threading.Tasks;
             var solution = _workspace.CurrentSolution.AddDocument(docInfo);
             _workspace.TryApplyChanges(solution);
             _project = _workspace.CurrentSolution.GetProject(_project.Id)!;
-        }
-    }
-    
-    public async Task<SignatureHelpResult?> GetSignatureHelpAsync(string code, int cursorPosition, string filePath)
-{
-    var document = UpdateDocument(code, filePath);
-    var root = await document.GetSyntaxRootAsync();
-    var semanticModel = await document.GetSemanticModelAsync();
-
-    var token = root?.FindToken(cursorPosition);
-    var node = token?.Parent;
-
-    var argumentList = node?.AncestorsAndSelf()
-        .OfType<ArgumentListSyntax>()
-        .FirstOrDefault();
-
-    if (argumentList == null) return null;
-
-    if (argumentList.Parent is not InvocationExpressionSyntax invocation) return null;
-
-    int activeParameter = 0;
-    foreach (var arg in argumentList.Arguments)
-    {
-        if (arg.Span.End < cursorPosition) 
-        {
-            activeParameter++;
-        }
-    }
-    var textBeforeCursor = code.Substring(argumentList.OpenParenToken.Span.End, cursorPosition - argumentList.OpenParenToken.Span.End);
-    if (textBeforeCursor.Trim().EndsWith(",")) 
-    {
-        activeParameter = textBeforeCursor.Count(c => c == ',');
-    }
-
-    var symbolInfo = semanticModel.GetSymbolInfo(invocation);
-    var symbols = new List<ISymbol>();
-
-    if (symbolInfo.Symbol != null) symbols.Add(symbolInfo.Symbol);
-    else if (symbolInfo.CandidateSymbols.Any()) symbols.AddRange(symbolInfo.CandidateSymbols);
-
-    if (!symbols.Any()) return null;
-
-    var result = new SignatureHelpResult { ActiveParameter = activeParameter };
-
-    foreach (var symbol in symbols)
-    {
-        if (symbol is IMethodSymbol method)
-        {
-            var sigItem = new SignatureItem
+            fileCount++;
+            
+            if (fileCount % 10 == 0 || fileCount == totalFiles)
             {
-                Label = method.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
-                Documentation = method.GetDocumentationCommentXml(), // Pega docs XML se houver
-                Parameters = method.Parameters.Select(p => new ParameterItem
-                {
-                    Name = p.Name,
-                    Type = p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
-                    Display = $"{p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {p.Name}"
-                }).ToList()
-            };
-            result.Signatures.Add(sigItem);
+                int percent = (int)((float)fileCount / totalFiles * 100);
+                onProgress?.Invoke($"Indexing source files:: {fileCount}/{totalFiles} ({percent}%)");
+            }
         }
+        
+        onProgress?.Invoke("LSP Ready! Project loaded successfully.");
     }
 
-    return result;
-}
+    public async Task<SignatureHelpResult?> GetSignatureHelpAsync(string code, int cursorPosition, string filePath)
+    {
+        var document = UpdateDocument(code, filePath);
+        var root = await document.GetSyntaxRootAsync();
+        var semanticModel = await document.GetSemanticModelAsync();
+
+        var token = root?.FindToken(cursorPosition);
+        var node = token?.Parent;
+
+        var argumentList = node?.AncestorsAndSelf()
+            .OfType<ArgumentListSyntax>()
+            .FirstOrDefault();
+
+        if (argumentList == null) return null;
+
+        if (argumentList.Parent is not InvocationExpressionSyntax invocation) return null;
+
+        int activeParameter = 0;
+        foreach (var arg in argumentList.Arguments)
+        {
+            if (arg.Span.End < cursorPosition)
+            {
+                activeParameter++;
+            }
+        }
+
+        var textBeforeCursor = code.Substring(argumentList.OpenParenToken.Span.End,
+            cursorPosition - argumentList.OpenParenToken.Span.End);
+        if (textBeforeCursor.Trim().EndsWith(","))
+        {
+            activeParameter = textBeforeCursor.Count(c => c == ',');
+        }
+
+        var symbolInfo = semanticModel.GetSymbolInfo(invocation);
+        var symbols = new List<ISymbol>();
+
+        if (symbolInfo.Symbol != null) symbols.Add(symbolInfo.Symbol);
+        else if (symbolInfo.CandidateSymbols.Any()) symbols.AddRange(symbolInfo.CandidateSymbols);
+
+        if (!symbols.Any()) return null;
+
+        var result = new SignatureHelpResult { ActiveParameter = activeParameter };
+
+        foreach (var symbol in symbols)
+        {
+            if (symbol is IMethodSymbol method)
+            {
+                var sigItem = new SignatureItem
+                {
+                    Label = method.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
+                    Documentation = method.GetDocumentationCommentXml(), // Pega docs XML se houver
+                    Parameters = method.Parameters.Select(p => new ParameterItem
+                    {
+                        Name = p.Name,
+                        Type = p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
+                        Display = $"{p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {p.Name}"
+                    }).ToList()
+                };
+                result.Signatures.Add(sigItem);
+            }
+        }
+
+        return result;
+    }
 }
 
 public class SignatureHelpResult

@@ -1,3 +1,4 @@
+using System.Text;
 using SLText.Core.Engine.Model;
 
 namespace SLText.Core.Engine;
@@ -15,6 +16,65 @@ public class TextBuffer
         _lines.Select(l => new string(l.ToArray()));
 
     public string GetAllText() => string.Join("\n", GetLines());
+    
+    public string GetTextInRange(int startOffset, int length)
+    {
+        if (length <= 0 || startOffset < 0) return string.Empty;
+
+        var sb = new StringBuilder();
+        int currentCount = 0;     
+        int charsCollected = 0;    
+
+        int currentLine = 0;
+        int currentCol = 0;
+        
+        for (int i = 0; i < _lines.Count; i++)
+        {
+            int lineLengthWithNewline = _lines[i].Count + 1; 
+
+            if (currentCount + lineLengthWithNewline > startOffset)
+            {
+                currentLine = i;
+                currentCol = startOffset - currentCount;
+                break;
+            }
+            currentCount += lineLengthWithNewline;
+        }
+
+        while (charsCollected < length && currentLine < _lines.Count)
+        {
+            var lineChars = _lines[currentLine];
+
+            if (currentCol < lineChars.Count)
+            {
+                sb.Append(lineChars[currentCol]);
+                currentCol++;
+                charsCollected++;
+            }
+            else if (currentCol == lineChars.Count)
+            {
+                if (currentLine < _lines.Count - 1)
+                {
+                    sb.Append('\n');
+                    charsCollected++;
+                }
+                else 
+                {
+                    break; 
+                }
+                
+                currentLine++;
+                currentCol = 0;
+            }
+            else
+            {
+                currentLine++;
+                currentCol = 0;
+            }
+        }
+
+        return sb.ToString();
+    }
     
     public List<SearchResult> SearchAll(string term)
     {
