@@ -54,7 +54,15 @@ public class EditorComponent : IComponent, IZoomable
         _diagnostics = diagnostics;
         if (diagnostics.Any())
         {
-            Console.WriteLine($"Editor recebeu {diagnostics.Count} erros do LSP.");
+            Console.WriteLine($"\n--- [RELATÓRIO LSP] {diagnostics.Count} Erros Encontrados ---");
+            
+            foreach (var diag in diagnostics)
+            {
+                var line = diag.Location.GetLineSpan().StartLinePosition.Line + 1;
+                Console.WriteLine($"   🔴 [{diag.Id}] Linha {line}: {diag.GetMessage()}");
+            }
+        
+            Console.WriteLine("----------------------------------------------------------\n");
         }
     }
     

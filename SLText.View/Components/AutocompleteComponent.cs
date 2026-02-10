@@ -17,11 +17,14 @@ public class AutocompleteComponent
     private const float MaxHeight = 250f;
 
     private SKFont _font;
+    private EditorTheme _theme = EditorTheme.Dark;
 
     public AutocompleteComponent(SKFont font)
     {
         _font = font;
     }
+    
+    public void ApplyTheme(EditorTheme theme) => _theme = theme;
 
     public void Show(float x, float y, List<string> items)
     {
@@ -94,7 +97,10 @@ public class AutocompleteComponent
         float contentRatio = (float)visibleCount / _items.Count;
         float thumbHeight = Math.Max(20, trackHeight * contentRatio); 
         
-        float scrollProgress = (float)_scrollIndex / (_items.Count - visibleCount);
+        int totalScrollableItems = _items.Count - visibleCount;
+        if (totalScrollableItems <= 0) return;
+        
+        float scrollProgress = (float)_scrollIndex / totalScrollableItems;
         float thumbY = trackY + (scrollProgress * (trackHeight - thumbHeight));
 
         using var thumbPaint = new SKPaint 
@@ -124,6 +130,8 @@ public class AutocompleteComponent
         {
             _scrollIndex = _selectedIndex - visibleCount + 1;
         }
+        
+        _scrollIndex = Math.Clamp(_scrollIndex, 0, Math.Max(0, _items.Count - visibleCount));
     }
 
     public string? GetCurrentItem() => _items.Count > 0 ? _items[_selectedIndex] : null;
