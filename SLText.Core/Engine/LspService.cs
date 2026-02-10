@@ -105,7 +105,13 @@ public class LspService
       global using Microsoft.Extensions.Configuration;
       global using Microsoft.Extensions.DependencyInjection;
       global using Microsoft.Extensions.Hosting;
-      global using Microsoft.Extensions.Logging;";
+      global using Microsoft.Extensions.Logging;
+ 
+      global using Microsoft.AspNetCore.Components;
+      global using Microsoft.AspNetCore.Components.Web;
+      global using Microsoft.AspNetCore.Components.Forms;
+      global using MudBlazor; 
+      global using MudBlazor.Services;";
         
         var docInfo = DocumentInfo.Create(
             DocumentId.CreateNewId(_project.Id),
@@ -130,7 +136,9 @@ public class LspService
         var diagnostics = semanticModel.GetDiagnostics()
             .Where(d => d.Location.IsInSource && 
                         d.Location.SourceTree?.FilePath == filePath && 
-                        d.Severity == DiagnosticSeverity.Error)
+                        d.Severity == DiagnosticSeverity.Error &&
+                        d.Id != "CS8802" && 
+                        d.Id != "CS8805")   
             .ToList();
 
         return diagnostics;
@@ -302,45 +310,88 @@ public class LspService
             FindTypeInNamespaceRecursively(childNs, targetTypeName, results);
         }
     }
+    
+    private HashSet<string> GetForbiddenAssemblies(string rootPath)
+    {
+        var forbidden = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    
+        try
+        {
+            var projectFiles = Directory.GetFiles(rootPath, "*.csproj", SearchOption.AllDirectories);
+        
+            foreach (var projPath in projectFiles)
+            {
+                try 
+                {
+                    var content = File.ReadAllText(projPath);
+                    var match = System.Text.RegularExpressions.Regex.Match(content, @"<AssemblyName>(.*?)</AssemblyName>");
+                
+                    if (match.Success)
+                    {
+                        forbidden.Add(match.Groups[1].Value.Trim() + ".dll");
+                    }
+                    else
+                    {
+                        forbidden.Add(Path.GetFileNameWithoutExtension(projPath) + ".dll");
+                    }
+                }
+                catch {}
+            }
+        }
+        catch { }
+    
+        return forbidden;
+    }
 
     public void LoadProjectFiles(string rootPath, Action<string>? onProgress = null)
     {
         onProgress?.Invoke($"Loading: {rootPath}");
         
-        var csprojFile = Directory.GetFiles(rootPath, "*.csproj", SearchOption.TopDirectoryOnly).FirstOrDefault();
-        string projectAssemblyName = csprojFile != null 
-            ? Path.GetFileNameWithoutExtension(csprojFile) + ".dll" 
-            : "NOME_IMPROVAVEL.dll";
+        var forbiddenDlls = GetForbiddenAssemblies(rootPath);
+    
+        if (forbiddenDlls.Count > 0)
+        {
+            Console.WriteLine($"[AUTO-DETECT] Bloqueando {forbiddenDlls.Count} DLLs de projeto para evitar conflito.");
+            foreach(var f in forbiddenDlls) Console.WriteLine($"   -> Bloqueado: {f}");
+        }
         
-        var projectReferences = new Dictionary<string, MetadataReference>(_referencesMap);
-        
+        var projectRefs = new Dictionary<string, MetadataReference>(_referencesMap, StringComparer.OrdinalIgnoreCase);
         var potentialDlls = Directory.GetFiles(rootPath, "*.dll", SearchOption.AllDirectories);
-        int dllCount = 0;
         
         foreach (var dllPath in potentialDlls)
         {
-            var fileName = Path.GetFileName(dllPath);
-            
             if (dllPath.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) 
                 continue;
-            if (fileName.Equals(projectAssemblyName, StringComparison.OrdinalIgnoreCase))
-                continue;
-            if (projectReferences.ContainsKey(fileName)) 
+            
+            var fileName = Path.GetFileName(dllPath);
+            
+            if (forbiddenDlls.Contains(fileName))
+            {
+                continue; 
+            }
+            
+            if (fileName.EndsWith(".Views.dll", StringComparison.OrdinalIgnoreCase)) 
                 continue;
             
-            try 
+            if (!projectRefs.ContainsKey(fileName))
             {
-                var reference = MetadataReference.CreateFromFile(dllPath);
-                projectReferences[fileName] = reference; 
-                dllCount++;
+                try 
+                {
+                    var refMetadata = MetadataReference.CreateFromFile(dllPath);
+                    projectRefs[fileName] = refMetadata;
+                }
+                catch { }
             }
-            catch { }
         }
-        
+
+
+        if (_project != null)
+        {
+            _project = _project.WithMetadataReferences(projectRefs.Values);
+            _workspace.TryApplyChanges(_project.Solution);
+        }
+
         onProgress?.Invoke($"Total references (System + AspNet + Project): {_referencesMap.Count}");
-        
-        InitProject(projectReferences.Values);
-        
         var files = Directory.GetFiles(rootPath, "*.cs", SearchOption.AllDirectories);
         int fileCount = 0;
         int totalFiles = files.Length;
@@ -349,26 +400,43 @@ public class LspService
         
         foreach (var file in files)
         {
-            if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") ||
-                file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
-            {
+            if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
                 continue;
+            
+            if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
+            {
+                if (!file.EndsWith(".razor.g.cs")) 
+                    continue;
+            }
+            
+            else
+            {
+                if (file.EndsWith(".AssemblyAttributes.cs")) 
+                    continue;
+
+                if (file.EndsWith(".g.cs") && !file.EndsWith(".razor.g.cs"))
+                    continue;
             }
 
             var code = File.ReadAllText(file).Replace("\r\n", "\n"); 
             var fileName = Path.GetFileName(file);
-            
-            var docId = DocumentId.CreateNewId(_project.Id);
-            var docInfo = DocumentInfo.Create(
-                docId,
-                fileName,
-                filePath: file, 
-                loader: TextLoader.From(TextAndVersion.Create(SourceText.From(code), VersionStamp.Create()))
-            );
 
-            var solution = _workspace.CurrentSolution.AddDocument(docInfo);
-            _workspace.TryApplyChanges(solution);
-            _project = _workspace.CurrentSolution.GetProject(_project.Id)!;
+            var existingDoc = _project.Documents.FirstOrDefault(d => d.FilePath == file);
+            if (existingDoc == null)
+            {
+                var docId = DocumentId.CreateNewId(_project.Id);
+                var docInfo = DocumentInfo.Create(
+                    docId,
+                    fileName,
+                    filePath: file, 
+                    loader: TextLoader.From(TextAndVersion.Create(SourceText.From(code), VersionStamp.Create()))
+                );
+
+                var solution = _workspace.CurrentSolution.AddDocument(docInfo);
+                _workspace.TryApplyChanges(solution);
+                _project = _workspace.CurrentSolution.GetProject(_project.Id)!;
+            }
+            
             fileCount++;
             
             if (fileCount % 10 == 0 || fileCount == totalFiles)
