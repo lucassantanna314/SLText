@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
@@ -16,23 +17,36 @@ public class LspService
     public LspService()
     {
         _workspace = new AdhocWorkspace();
-        var coreDir = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
-        LoadReferencesFromDirectory(coreDir);
-        
-        var dotnetRoot = Directory.GetParent(coreDir)?.Parent?.FullName; // Sobe de Microsoft.NETCore.App/Versao para /shared
-        if (dotnetRoot != null)
+    
+        var assemblyLocation = typeof(object).Assembly.Location;
+        if (string.IsNullOrEmpty(assemblyLocation))
         {
-            var aspNetCoreRoot = Path.Combine(dotnetRoot, "Microsoft.AspNetCore.App");
-            if (Directory.Exists(aspNetCoreRoot))
-            {
-                var latestVersion = Directory.GetDirectories(aspNetCoreRoot)
-                    .OrderByDescending(d => d)
-                    .FirstOrDefault();
+            assemblyLocation = Path.Combine(RuntimeEnvironment.GetRuntimeDirectory(), "System.Runtime.dll");
+        }
 
-                if (latestVersion != null)
+        var coreDir = Path.GetDirectoryName(assemblyLocation);
+        if (coreDir != null)
+        {
+            LoadReferencesFromDirectory(coreDir);
+        
+            var coreParent = Directory.GetParent(coreDir); 
+            var sharedParent = coreParent?.Parent;         
+            var dotnetRoot = sharedParent?.Parent?.FullName; 
+
+            if (dotnetRoot != null)
+            {
+                var aspNetCoreRoot = Path.Combine(dotnetRoot, "Microsoft.AspNetCore.App");
+                if (Directory.Exists(aspNetCoreRoot))
                 {
-                    LoadReferencesFromDirectory(latestVersion);
-                    Console.WriteLine($"[LSP] ASP.NET Core Framework carregado de: {latestVersion}");
+                    var latestVersion = Directory.GetDirectories(aspNetCoreRoot)
+                        .OrderByDescending(d => d)
+                        .FirstOrDefault();
+
+                    if (latestVersion != null)
+                    {
+                        LoadReferencesFromDirectory(latestVersion);
+                        Console.WriteLine($"[LSP] ASP.NET Core Framework carregado de: {latestVersion}");
+                    }
                 }
             }
         }
