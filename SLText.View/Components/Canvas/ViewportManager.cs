@@ -14,6 +14,18 @@ public class ViewportManager
     {
         _lineHeight = lineHeight;
     }
+    
+    public void ResetScroll()
+    {
+        ScrollX = 0;
+        ScrollY = 0;
+    }
+
+    public void SetScroll(float x, float y)
+    {
+        ScrollX = Math.Max(0, x);
+        ScrollY = Math.Max(0, y);
+    }
 
     public void UpdateBounds(SKRect bounds) => _bounds = bounds;
     

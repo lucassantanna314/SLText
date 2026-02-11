@@ -300,7 +300,7 @@ public class WindowManager : IDisposable
         _diagnosticCts?.Cancel();
         
         string ext = Path.GetExtension(_currentFilePath ?? "").ToLower();
-        if (ext != ".cs" && ext != ".razor")
+        if (ext != ".cs")
         {
             _editor.SetDiagnostics(new List<Diagnostic>());
             _terminal.ShowDiagnostics(new List<Diagnostic>(), Path.GetFileName(_currentFilePath ?? ""));
@@ -462,7 +462,7 @@ public class WindowManager : IDisposable
                 try 
                 {
                     string ext = Path.GetExtension(_currentFilePath ?? "").ToLower();
-                    if (ext != ".cs" && ext != ".razor") return;
+                    if (ext != ".cs") return;
                     
                     if (char.IsLetterOrDigit(c) || c == '.' || c == '_')
                     {
@@ -1314,6 +1314,16 @@ public class WindowManager : IDisposable
         _explorer.SetSelectedFile(active.FilePath);
 
         _editor.SetCurrentData(active.Buffer, active.Cursor);
+        
+        if (resetCursor) {
+            _editor.SetScroll(0, 0);
+        } else {
+            _editor.SetScroll(active.SavedScrollX, active.SavedScrollY);
+        }
+        
+        _editor.UpdateSyntax(active.FilePath);
+        _editor.RequestScrollToCursor();
+        
         _editor.SetDiagnostics(new List<Diagnostic>());
         _terminal.ShowDiagnostics(new List<Diagnostic>(), active.Title);
         RequestDiagnostics(instant: true);
@@ -1330,6 +1340,8 @@ public class WindowManager : IDisposable
         _tabComponent.EnsureActiveTabVisible();
 
         UpdateTitle();
+        
+        _editor.RequestScrollToCursor();
     }
 
     private StandardCursor _lastAppliedCursor = StandardCursor.Default;
