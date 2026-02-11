@@ -5,6 +5,7 @@ using SLText.Core.Engine;
 using SLText.View.Components;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using Microsoft.CodeAnalysis;
 using Silk.NET.Core;
 using SLText.Core.Engine.Model;
 using SLText.View.Services;
@@ -58,6 +59,11 @@ public class WindowManager : IDisposable
     private TerminalComponent _terminal;
     private bool _isTerminalFocused = false;
     private IMouse? _primaryMouse;
+    
+    private LspService _lspService = new();
+    private AutocompleteComponent _autocomplete;
+    private SignatureHelpComponent _signatureHelp;
+    private CancellationTokenSource? _diagnosticCts;
 
     private RunService _runService = new();
     private RunConfiguration? _activeConfiguration;
@@ -73,6 +79,8 @@ public class WindowManager : IDisposable
         _tabComponent.ApplyTheme(theme);
         _search.ApplyTheme(theme);
         _terminal.ApplyTheme(theme);
+        _signatureHelp.ApplyTheme(theme);
+        _autocomplete.ApplyTheme(theme);
     }
 
     public WindowManager(TextBuffer buffer, CursorManager cursor, InputHandler input, string? initialFilePath = null)
@@ -97,9 +105,10 @@ public class WindowManager : IDisposable
         _tabManager = new TabManager();
         _tabComponent = new TabComponent(_tabManager);
         _tabManager.AddTab(buffer, cursor, initialFilePath);
-        _editor = new EditorComponent(_tabManager.ActiveTab!.Buffer, _tabManager.ActiveTab.Cursor);
-        _terminal = new TerminalComponent();
-
+        _editor.SetCurrentData(_tabManager.ActiveTab!.Buffer, _tabManager.ActiveTab.Cursor);        _terminal = new TerminalComponent();
+        _autocomplete = new AutocompleteComponent(_editor.Font);
+        _signatureHelp = new SignatureHelpComponent();
+        
         _currentFilePath = initialFilePath;
 
         _window.Load += OnLoad;
@@ -144,6 +153,28 @@ public class WindowManager : IDisposable
                     _explorer.IsVisible = true;
                     _terminal.SetWorkingDirectory(folder);
                     _runService.ScanProject(folder);
+                    _editor.SetDiagnostics(new List<Diagnostic>());
+                    _terminal.ShowDiagnostics(new List<Diagnostic>(), "Project Loaded");
+                    _diagnosticCts?.Cancel();
+                    
+                    _terminal.WriteOutput("Output", $"Open folder: {folder}", clearFirst: true);
+                    
+                    Task.Run(() => 
+                    {
+                        try 
+                        {
+                            _lspService.LoadProjectFiles(folder, (statusMessage) => 
+                            {
+                                _terminal.WriteOutput("Output", statusMessage);
+                            });
+
+                            RequestDiagnostics(instant: true);
+                        }
+                        catch (Exception ex)
+                        {
+                            _terminal.WriteOutput("Output", $"[FATAL ERROR] Failed to load project: {ex.Message}");
+                        }
+                    });
                 }
             }
         };
@@ -201,6 +232,109 @@ public class WindowManager : IDisposable
         {
             HandleRunTest(line);
         };
+        
+        _editor.OnQuickFixRequested += async (line, symbolText) =>
+        {
+            string ext = Path.GetExtension(_currentFilePath ?? "").ToLower();
+            if (ext != ".cs") return;
+            
+            var namespaces = await _lspService.GetTypeNamespacesAsync(symbolText);
+    
+            if (namespaces.Any())
+            {
+                var suggestions = namespaces.Select(ns => $"using {ns};").ToList();
+        
+                var pos = _editor.GetCursorScreenPosition(); 
+        
+                _cursor.SetPosition(line, 0);
+                pos = _editor.GetCursorScreenPosition();
+
+                _autocomplete.Show(pos.x + 30, pos.y, suggestions);
+        
+            }
+        };
+        
+        _inputHandler.OnReloadProjectRequested += () =>
+        {
+            if (string.IsNullOrEmpty(_lastDirectory))
+            {
+                _modal.Show("Aviso", "Nenhum diretório aberto para recarregar.", null, null, null);
+                return;
+            }
+
+            if (!_terminal.IsVisible) _terminal.IsVisible = true;
+    
+            var buildTab = _terminal.CreateNewTab("Build-Reload", _lastDirectory, forceNew: false);
+    
+            lock (buildTab.OutputLines) { buildTab.OutputLines.Clear(); buildTab.OutputLines.Add("--- Starting Build for Reload ---"); }
+    
+            buildTab.Service.SendCommand("dotnet build\n");
+            _terminal.ShowDiagnostics(new List<Diagnostic>(), "Reloading References...");
+
+            Task.Run(async () =>
+            {
+                try 
+                {
+                    await Task.Delay(5000);
+
+                    _terminal.WriteOutput("Output", "Reloading references after build...", clearFirst: false);
+
+                    _lspService.LoadProjectFiles(_lastDirectory, (msg) => 
+                    {
+                        _terminal.WriteOutput("Output", msg);
+                    });
+                    
+                    _editor.SetDiagnostics(new List<Diagnostic>());
+                    RequestDiagnostics(instant: true);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error reloading project: {ex.Message}");
+                }
+            });
+        };
+    }
+    
+    private void RequestDiagnostics(bool instant = false)
+    {
+        _diagnosticCts?.Cancel();
+        
+        string ext = Path.GetExtension(_currentFilePath ?? "").ToLower();
+        if (ext != ".cs")
+        {
+            _editor.SetDiagnostics(new List<Diagnostic>());
+            _terminal.ShowDiagnostics(new List<Diagnostic>(), Path.GetFileName(_currentFilePath ?? ""));
+            return;
+        }
+        
+        _diagnosticCts = new CancellationTokenSource();
+        var token = _diagnosticCts.Token;
+
+        string code = _buffer.GetAllText();
+        string path = _currentFilePath ?? "new_file.cs";
+        string fileName = Path.GetFileName(path);
+
+        _ = Task.Run(async () => 
+        {
+            try 
+            {
+                if (!instant) 
+                {
+                    await Task.Delay(600, token); 
+                }
+                if (token.IsCancellationRequested) return;
+
+                var diagnostics = await _lspService.GetDiagnosticsAsync(code, path);
+
+                if (!token.IsCancellationRequested)
+                {
+                    _editor.SetDiagnostics(diagnostics);
+                    _terminal.ShowDiagnostics(diagnostics, fileName);
+                }
+            }
+            catch (TaskCanceledException) { /* Ignora */ }
+            catch (Exception ex) { Console.WriteLine($"Erro diagnósticos: {ex.Message}"); }
+        }, token);
     }
 
     private void OnWindowClosing()
@@ -273,8 +407,10 @@ public class WindowManager : IDisposable
             keyboard.KeyUp += (k, key, scancode) => {
                 if (key == _lastPressedKey) _lastPressedKey = null;
             };
+            
+            
 
-            keyboard.KeyChar += (k, c) =>
+            keyboard.KeyChar += async (k, c) =>
             {
                 if (_commandPalette.IsVisible)
                 {
@@ -320,6 +456,88 @@ public class WindowManager : IDisposable
                 _inputHandler.HandleTextInput(c);
 
                 if (!activeTab.IsDirty) { activeTab.IsDirty = true; UpdateTitle(); }
+                
+                RequestDiagnostics();
+                
+                try 
+                {
+                    string ext = Path.GetExtension(_currentFilePath ?? "").ToLower();
+                    if (ext != ".cs") return;
+                    
+                    if (char.IsLetterOrDigit(c) || c == '.' || c == '_')
+                    {
+                        var pos = _editor.GetCursorScreenPosition();
+                        int flatOffset = _buffer.GetFlatOffset(_cursor.Line, _cursor.Column);
+                        string allText = _buffer.GetAllText();
+
+                        string partialWord = GetPartialWord(_buffer.GetLine(_cursor.Line), _cursor.Column);
+
+                        // 2. Chama o LSP
+                        string path = _currentFilePath ?? "new_file.cs";
+                        var completions = await _lspService.GetCompletionsAsync(allText, flatOffset, path);
+
+                        if (completions != null && completions.Any())
+                        {
+                            var filtered = completions
+                                .Select(i => i.DisplayText)
+                                .Where(text => text.StartsWith(partialWord, StringComparison.OrdinalIgnoreCase))
+                                .ToList();
+
+                            if (filtered.Any())
+                            {
+                                _autocomplete.Show(pos.x, pos.y + 20, filtered); 
+                            }
+                            else
+                            {
+                                _autocomplete.IsVisible = false;
+                            }
+                        }
+                        else
+                        {
+                            _autocomplete.IsVisible = false;
+                        }
+                    }
+                    else
+                    {
+                        _autocomplete.IsVisible = false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"UI Completion Dispatch Error: {ex.Message}");
+                }
+                
+                //help
+                if (c == '(' || c == ',')
+                {
+                    string ext = Path.GetExtension(_currentFilePath ?? "").ToLower();
+                    if (ext != ".cs") return;
+                    
+                    var pos = _editor.GetCursorScreenPosition();
+                    int flatOffset = _buffer.GetFlatOffset(_cursor.Line, _cursor.Column);
+                    string code = _buffer.GetAllText();
+                    string path = _currentFilePath ?? "new_file.cs";
+
+                    var sigData = await _lspService.GetSignatureHelpAsync(code, flatOffset, path);
+        
+                    if (sigData != null && sigData.Signatures.Any())
+                    {
+                        _signatureHelp.Show(pos.x, pos.y, sigData);
+                    }
+                }
+                else if (c == ')')
+                {
+                    _signatureHelp.IsVisible = false; 
+                }
+                
+                else if (_signatureHelp.IsVisible)
+                {
+                    var pos = _editor.GetCursorScreenPosition();
+                    int flatOffset = _buffer.GetFlatOffset(_cursor.Line, _cursor.Column);
+                    var sigData = await _lspService.GetSignatureHelpAsync(_buffer.GetAllText(), flatOffset, _currentFilePath ?? "new.cs");
+                    if (sigData != null) _signatureHelp.Show(pos.x, pos.y, sigData);
+                    else _signatureHelp.IsVisible = false;
+                }
             };
         }
 
@@ -330,6 +548,21 @@ public class WindowManager : IDisposable
             mouse.MouseDown += (m, button) =>
             {
                 var pos = m.Position;
+                
+                if (_autocomplete.IsVisible && _autocomplete.Bounds.Contains(pos.X, pos.Y))
+                {
+                    bool clickedValidItem = _autocomplete.SelectIndexByMouseY(pos.Y); 
+
+                    if (clickedValidItem)
+                    {
+                        ApplyAutocomplete(); 
+                        return; 
+                    }
+                }
+                
+                if (_autocomplete.IsVisible) _autocomplete.IsVisible = false;
+                if (_signatureHelp.IsVisible) _signatureHelp.IsVisible = false;
+                
                 float explorerWidth = _explorer.IsVisible ? _explorer.Width : 0;
 
 
@@ -551,11 +784,15 @@ public class WindowManager : IDisposable
 
         _inputHandler.OnScrollRequested += (deltaX, deltaY) =>
         {
+            if (_autocomplete.IsVisible) _autocomplete.IsVisible = false;
+            if (_signatureHelp.IsVisible) _signatureHelp.IsVisible = false;
             _editor.ApplyScroll(deltaX, deltaY);
         };
 
         _inputHandler.OnZoomRequested += (delta) =>
         {
+            if (_autocomplete.IsVisible) _autocomplete.IsVisible = false;
+            if (_signatureHelp.IsVisible) _signatureHelp.IsVisible = false;
             _editor.FontSize += delta;
             _editor.RequestScrollToCursor();
         };
@@ -595,6 +832,63 @@ public class WindowManager : IDisposable
         }
 
         ApplyTheme(EditorTheme.Dark);
+    }
+    
+    private void ApplyAutocomplete()
+    {
+        var item = _autocomplete.GetCurrentItem(); 
+        if (string.IsNullOrEmpty(item)) return;
+        
+        if (item.StartsWith("using "))
+        {
+            string cleanItem = item.Replace("\r", "").Replace("\n", "").Trim();
+            _tabManager.ActiveTab!.Buffer.InsertLine(0, cleanItem);            _autocomplete.IsVisible = false;
+            RequestDiagnostics(instant: true);
+            return;
+        }
+
+        var activeTab = _tabManager.ActiveTab;
+        if (activeTab == null) return;
+
+        string currentLine = activeTab.Buffer.GetLine(activeTab.Cursor.Line);
+        string partialWord = GetPartialWord(currentLine, activeTab.Cursor.Column);
+
+        if (partialWord.Length > 0)
+        {
+            for(int i = 0; i < partialWord.Length; i++) 
+                activeTab.Cursor.MoveLeft();
+          
+            for(int i=0; i < partialWord.Length; i++) 
+                activeTab.Buffer.Delete(activeTab.Cursor.Line, activeTab.Cursor.Column);
+        }
+        
+        string cleanCode = item.Replace("\r", "").Replace("\n", "");
+        activeTab.Buffer.Insert(activeTab.Cursor.Line, activeTab.Cursor.Column, cleanCode);
+        
+        for(int i = 0; i < item.Length; i++) 
+            activeTab.Cursor.MoveRight();
+       
+
+        _autocomplete.IsVisible = false;
+        _window.DoRender(); 
+    }
+    
+    private string GetPartialWord(string line, int column)
+    {
+        if (string.IsNullOrEmpty(line) || column == 0) return "";
+
+        int start = column - 1;
+        while (start >= 0)
+        {
+            char c = line[start];
+            if (!char.IsLetterOrDigit(c) && c != '_') 
+            {
+                break; 
+            }
+            start--;
+        }
+    
+        return line.Substring(start + 1, column - (start + 1));
     }
 
     private void OpenRunConfigurationSelector()
@@ -659,11 +953,43 @@ public class WindowManager : IDisposable
 
     private void OnKeyDown(IKeyboard k, Key key, int arg3)
     {
+        if (_signatureHelp.IsVisible)
+        {
+            if (key == Key.Left || key == Key.Right || key == Key.Home || key == Key.End || key == Key.PageUp || key == Key.PageDown)
+            {
+                _signatureHelp.IsVisible = false;
+            }
+        }
+        
+        if (_autocomplete.IsVisible)
+        {
+            if (key == Key.Up) { _autocomplete.MoveSelection(-1); return; }
+            if (key == Key.Down) { _autocomplete.MoveSelection(1); return; }
+            
+            if (key == Key.Tab || key == Key.Enter)
+            {
+                ApplyAutocomplete();
+                return; 
+            }
+            
+            if (key == Key.Escape) { _autocomplete.IsVisible = false; return; }
+
+            if (key == Key.Left || key == Key.Right || key == Key.Home || key == Key.End || key == Key.PageUp || key == Key.PageDown)
+            {
+                _autocomplete.IsVisible = false;
+            }
+        }
+        
         if (IsNavigationOnly(key) || key == Key.Backspace || key == Key.Delete)
         {
             _lastPressedKey = key;
             _repeatTimer = 0;
             _isFirstRepeat = true;
+            
+            if (key == Key.Backspace || key == Key.Delete)
+            {
+                RequestDiagnostics();
+            }
         }
         else
         {
@@ -671,6 +997,11 @@ public class WindowManager : IDisposable
         }
 
         ProcessKeyPress(key);
+        
+        if (key == Key.Backspace || key == Key.Delete || (key == Key.V && _activeKeyboard!.IsKeyPressed(Key.ControlLeft)))
+        {
+            RequestDiagnostics();
+        }
         
     }
 
@@ -900,6 +1231,16 @@ public class WindowManager : IDisposable
             _commandPalette.ApplyTheme(_currentTheme);
             _commandPalette.Render(canvas);
         }
+        
+        if (_autocomplete.IsVisible)
+        {
+            _autocomplete.Render(canvas, _currentTheme);
+        }
+        
+        if (_signatureHelp.IsVisible)
+        {
+            _signatureHelp.Render(canvas, _currentTheme);
+        }
 
         _grContext.Flush();
     }
@@ -968,9 +1309,24 @@ public class WindowManager : IDisposable
     {
         var active = _tabManager.ActiveTab!;
         _currentFilePath = active.FilePath;
+        _buffer = active.Buffer;
+        _cursor = active.Cursor;
         _explorer.SetSelectedFile(active.FilePath);
 
         _editor.SetCurrentData(active.Buffer, active.Cursor);
+        
+        if (resetCursor) {
+            _editor.SetScroll(0, 0);
+        } else {
+            _editor.SetScroll(active.SavedScrollX, active.SavedScrollY);
+        }
+        
+        _editor.UpdateSyntax(active.FilePath);
+        _editor.RequestScrollToCursor();
+        
+        _editor.SetDiagnostics(new List<Diagnostic>());
+        _terminal.ShowDiagnostics(new List<Diagnostic>(), active.Title);
+        RequestDiagnostics(instant: true);
         _inputHandler.UpdateActiveData(active.Cursor, active.Buffer);
         _mouseHandler.UpdateActiveCursor(active.Cursor);
         _statusBar.UpdateActiveBuffer(active.Buffer, active.Cursor);
@@ -984,6 +1340,8 @@ public class WindowManager : IDisposable
         _tabComponent.EnsureActiveTabVisible();
 
         UpdateTitle();
+        
+        _editor.RequestScrollToCursor();
     }
 
     private StandardCursor _lastAppliedCursor = StandardCursor.Default;
@@ -1058,7 +1416,19 @@ public class WindowManager : IDisposable
 
     private void SetupSurface()
     {
-        var target = new GRBackendRenderTarget(_window.Size.X, _window.Size.Y, 0, 8, new GRGlFramebufferInfo(0, 0x8058));
+        if (_surface != null)
+        {
+            _surface.Dispose();
+            _surface = null;
+        }
+
+        if (_grContext == null) return;
+
+        var width = Math.Max(1, _window.Size.X);
+        var height = Math.Max(1, _window.Size.Y);
+        
+        var target = new GRBackendRenderTarget(width, height, 0, 8, new GRGlFramebufferInfo(0, 0x8058)); // 0x8058 = GL_RGBA8
+    
         _surface = SKSurface.Create(_grContext, target, GRSurfaceOrigin.BottomLeft, SKColorType.Rgba8888);
     }
 
@@ -1083,10 +1453,17 @@ public class WindowManager : IDisposable
                 {
                     _inputHandler.HandleShortcut(true, false, "S");
                     FinishClosingTab();
+                    _editor.SetDiagnostics(new List<Diagnostic>());
+                    _terminal.ShowDiagnostics(new List<Diagnostic>(), active.Title);
+                    RequestDiagnostics();
                 },
                 onNo: () =>
                 {
+                    _editor.SetDiagnostics(new List<Diagnostic>());
+                    _terminal.ShowDiagnostics(new List<Diagnostic>(), active.Title);
+                    RequestDiagnostics();
                     FinishClosingTab();
+                    
                 },
                 onCancel: () =>
                 {
@@ -1096,6 +1473,9 @@ public class WindowManager : IDisposable
         else
         {
             FinishClosingTab();
+            _editor.SetDiagnostics(new List<Diagnostic>());
+            _terminal.ShowDiagnostics(new List<Diagnostic>(), active.Title);
+            RequestDiagnostics();
         }
     }
 

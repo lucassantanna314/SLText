@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Microsoft.CodeAnalysis;
 using SkiaSharp;
 using SLText.Core.Engine;
 using SLText.Core.Engine.Model;
@@ -29,6 +30,7 @@ public class EditorComponent : IComponent, IZoomable
     private EditorTheme _theme = EditorTheme.Dark;
     private List<(string pattern, SKColor color)> _currentRules = new();
     private readonly SKFont _font;
+    public SKFont Font => _font;
     private float _lineHeight;
 
     private bool _showCursor = true;
@@ -43,8 +45,29 @@ public class EditorComponent : IComponent, IZoomable
     private float _lastMouseX;
     
     public event Action<int>? OnRunTestRequested;
+    public event Action<int, string>? OnQuickFixRequested;
     private static readonly Regex TestAttributeRegex = new Regex(@"\[(Test|Fact|TestMethod|TestClass)\]", RegexOptions.Compiled);
-
+    
+    private List<Diagnostic> _diagnostics = new();
+    
+    public void SetDiagnostics(List<Diagnostic> diagnostics) 
+    {
+        _diagnostics = diagnostics;
+        _gutterRenderer.SetDiagnostics(diagnostics);
+        //if (diagnostics.Any())
+        //{
+        //    Console.WriteLine($"\n--- [RELATÓRIO LSP] {diagnostics.Count} Erros Encontrados ---");
+            
+        //    foreach (var diag in diagnostics)
+        //    {
+        //        var line = diag.Location.GetLineSpan().StartLinePosition.Line + 1;
+        //        Console.WriteLine($"   🔴 [{diag.Id}] Linha {line}: {diag.GetMessage()}");
+         //   }
+        
+        //    Console.WriteLine("----------------------------------------------------------\n");
+       // }
+    }
+    
     public EditorComponent(TextBuffer buffer, CursorManager cursor)
     {
         _buffer = buffer;
@@ -66,6 +89,41 @@ public class EditorComponent : IComponent, IZoomable
         _bracketRenderer = new BracketRenderer(_font, _theme);
         _indentGuideRenderer = new IndentGuideRenderer(_theme);
     }
+    
+    private void RenderDiagnostics(SKCanvas canvas, int lineIndex, float textX, float yPos)
+    {
+        if (_diagnostics == null || _diagnostics.Count == 0) return;
+
+        var lineErrors = _diagnostics.Where(d => d.Location.GetLineSpan().StartLinePosition.Line == lineIndex);
+
+        using var paint = new SKPaint
+        {
+            Color = SKColors.Red,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 2.0f, 
+            IsAntialias = true,
+            PathEffect = SKPathEffect.CreateDash(new float[] { 2, 2 }, 0) 
+        };
+
+        foreach (var diag in lineErrors)
+        {
+            var span = diag.Location.GetLineSpan();
+            string lineText = _buffer.GetLine(lineIndex);
+
+            int startChar = Math.Clamp(span.StartLinePosition.Character, 0, lineText.Length);
+            int endChar = Math.Clamp(span.EndLinePosition.Character, 0, lineText.Length);
+        
+            float startX = _font.MeasureText(lineText.Substring(0, startChar));
+            float endX = _font.MeasureText(lineText.Substring(0, endChar));
+
+            if (endX - startX < 4) 
+            {
+                endX = startX + 8; 
+            }
+
+            canvas.DrawLine(textX + startX, yPos + 3, textX + endX, yPos + 3, paint);
+        }
+    }
 
     public void Render(SKCanvas canvas)
     {
@@ -85,58 +143,68 @@ public class EditorComponent : IComponent, IZoomable
         _gutterRenderer.Render(canvas, Bounds, visibleLineNumbers, _lineHeight, _viewport.ScrollY, _buffer);
         
         canvas.Save();
-        var contentClip = new SKRect(Bounds.Left + gutterWidth, Bounds.Top, Bounds.Right, Bounds.Bottom);
-        canvas.ClipRect(contentClip);
-
-        _indentGuideRenderer.Render(canvas, _buffer, _cursor, gutterWidth, charWidth, Bounds, _lineHeight,
-            _viewport.ScrollY, extension);
-
-        canvas.Translate(-_viewport.ScrollX, -_viewport.ScrollY);
-
-        float textX = Bounds.Left + gutterWidth + 10;
-
-        for (int i = 0; i < lines.Count; i++)
+        try
         {
-            float yPos = Bounds.Top + (i * _lineHeight) - metrics.Ascent;
 
-            float relativeY = yPos - _viewport.ScrollY;
+            var contentClip = new SKRect(Bounds.Left + gutterWidth, Bounds.Top, Bounds.Right, Bounds.Bottom);
+            canvas.ClipRect(contentClip);
 
-            if (relativeY < Bounds.Top - _lineHeight) continue;
+            _indentGuideRenderer.Render(canvas, _buffer, _cursor, gutterWidth, charWidth, Bounds, _lineHeight,
+                _viewport.ScrollY, extension);
 
-            if (relativeY > Bounds.Bottom + _lineHeight) break;
+            canvas.Translate(-_viewport.ScrollX, -_viewport.ScrollY);
 
-            if (i == _cursor.Line) RenderLineHighlight(canvas, yPos, gutterWidth, metrics);
+            float textX = Bounds.Left + gutterWidth + 10;
 
-            RenderSelection(canvas, i, yPos, gutterWidth, metrics);
-
-            var lineResults = _searchResults.Where(r => r.Line == i);
-            foreach (var res in lineResults)
+            for (int i = 0; i < lines.Count; i++)
             {
-                float startX = _font.MeasureText(lines[i].Substring(0, res.Column));
-                float width = _font.MeasureText(lines[i].Substring(res.Column, res.Length));
+                float yPos = Bounds.Top + (i * _lineHeight) - metrics.Ascent;
 
-                using var searchPaint = new SKPaint { Color = SKColors.BlueViolet.WithAlpha(40) };
-                var searchRect = new SKRect(
-                    textX + startX,
-                    yPos + metrics.Ascent,
-                    textX + startX + width,
-                    yPos + metrics.Descent
-                );
-                canvas.DrawRect(searchRect, searchPaint);
+                float relativeY = yPos - _viewport.ScrollY;
+
+                if (relativeY < Bounds.Top - _lineHeight) continue;
+
+                if (relativeY > Bounds.Bottom + _lineHeight) break;
+
+                if (i == _cursor.Line) RenderLineHighlight(canvas, yPos, gutterWidth, metrics);
+
+                RenderSelection(canvas, i, yPos, gutterWidth, metrics);
+
+                var lineResults = _searchResults.Where(r => r.Line == i);
+                foreach (var res in lineResults)
+                {
+                    float startX = _font.MeasureText(lines[i].Substring(0, res.Column));
+                    float width = _font.MeasureText(lines[i].Substring(res.Column, res.Length));
+
+                    using var searchPaint = new SKPaint { Color = SKColors.BlueViolet.WithAlpha(40) };
+                    var searchRect = new SKRect(
+                        textX + startX,
+                        yPos + metrics.Ascent,
+                        textX + startX + width,
+                        yPos + metrics.Descent
+                    );
+                    canvas.DrawRect(searchRect, searchPaint);
+                }
+
+                string lineToRender = lines[i];
+                _textRenderer.RenderLine(canvas, lineToRender, textX, yPos, _currentRules);
+
+                RenderDiagnostics(canvas, i, textX, yPos);
+
+                if (i == _cursor.Line && _showCursor)
+                {
+                    RenderCursor(canvas, textX, yPos, lineToRender, metrics);
+                }
             }
 
-            string lineToRender = lines[i];
-            _textRenderer.RenderLine(canvas, lineToRender, textX, yPos, _currentRules);
+            _bracketRenderer.Render(canvas, _buffer, _cursor, textX, Bounds, _lineHeight, _viewport.ScrollY, metrics);
 
-            if (i == _cursor.Line && _showCursor)
-            {
-                RenderCursor(canvas, textX, yPos, lineToRender, metrics);
-            }
+        }
+        finally
+        {
+            canvas.Restore();
         }
 
-        _bracketRenderer.Render(canvas, _buffer, _cursor, textX, Bounds, _lineHeight, _viewport.ScrollY, metrics);
-
-        canvas.Restore();
         DrawScrollbars(canvas);
     }
 
@@ -178,10 +246,12 @@ public class EditorComponent : IComponent, IZoomable
 
     public void SetCurrentData(TextBuffer buffer, CursorManager cursor)
     {
+        if (buffer == null || cursor == null) return;
+        
         _buffer = buffer;
         _cursor = cursor;
 
-        _viewport.UpdateBounds(Bounds);
+        _viewport.UpdateBounds(Bounds); 
 
     }
 
@@ -224,14 +294,28 @@ public class EditorComponent : IComponent, IZoomable
     public void HandleGutterClick(float x, float y)
     {
         float gutterWidth = _gutterRenderer.GetWidth(_buffer.LineCount);
-        if (x < Bounds.Left + 30) 
+        
+        if (x < Bounds.Left + gutterWidth)
         {
             var (line, _) = GetTextPositionFromMouse(x, y);
+            
             string lineContent = _buffer.GetLine(line);
-
             if (TestAttributeRegex.IsMatch(lineContent))
             {
                 OnRunTestRequested?.Invoke(line); 
+                return;
+            }
+            
+            var error = _diagnostics.FirstOrDefault(d => 
+                d.Location.GetLineSpan().StartLinePosition.Line == line && 
+                d.Id == "CS0246");
+            
+            if (error != null)
+            {
+                var span = error.Location.SourceSpan;
+                string textWithError = _buffer.GetTextInRange(span.Start, span.Length);
+                
+                OnQuickFixRequested?.Invoke(line, textWithError);
             }
         }
         EnsureCursorVisible();
@@ -467,6 +551,19 @@ public class EditorComponent : IComponent, IZoomable
         _isDraggingVertical = false;
         _isDraggingHorizontal = false;
     }
+    
+    public (float x, float y) GetCursorScreenPosition()
+    {
+        _font.GetFontMetrics(out var metrics);
+        float gutterWidth = GetGutterWidth();
+    
+        string lineText = _buffer.GetLine(_cursor.Line);
+        int safeCol = Math.Min(_cursor.Column, lineText.Length);
+        float cursorX = _font.MeasureText(lineText.Substring(0, safeCol));
 
-    public bool IsDraggingScrollbar => _isDraggingVertical || _isDraggingHorizontal;
+        float screenX = Bounds.Left + gutterWidth + 10 + cursorX - _viewport.ScrollX;
+        float screenY = Bounds.Top + (_cursor.Line * _lineHeight) + _lineHeight - _viewport.ScrollY;
+
+        return (screenX, screenY);
+    }
 }
