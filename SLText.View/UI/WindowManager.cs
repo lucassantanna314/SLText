@@ -300,7 +300,7 @@ public class WindowManager : IDisposable
         _diagnosticCts?.Cancel();
         
         string ext = Path.GetExtension(_currentFilePath ?? "").ToLower();
-        if (ext != ".cs") 
+        if (ext != ".cs" && ext != ".razor")
         {
             _editor.SetDiagnostics(new List<Diagnostic>());
             _terminal.ShowDiagnostics(new List<Diagnostic>(), Path.GetFileName(_currentFilePath ?? ""));
@@ -462,7 +462,7 @@ public class WindowManager : IDisposable
                 try 
                 {
                     string ext = Path.GetExtension(_currentFilePath ?? "").ToLower();
-                    if (ext != ".cs") return;
+                    if (ext != ".cs" && ext != ".razor") return;
                     
                     if (char.IsLetterOrDigit(c) || c == '.' || c == '_')
                     {

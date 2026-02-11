@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 using Microsoft.CodeAnalysis.Completion;
@@ -11,7 +12,7 @@ public class LspService
     private AdhocWorkspace _workspace;
     private Project _project;
     private readonly Dictionary<string, MetadataReference> _referencesMap = new();
-    
+    private string _rootPath = "";
     public LspService()
     {
         _workspace = new AdhocWorkspace();
@@ -35,8 +36,31 @@ public class LspService
                 }
             }
         }
+    }
+    
+    private string GetProjectAssemblyName(string rootPath)
+    {
+        try
+        {
+            var csprojPath = Directory.GetFiles(rootPath, "*.csproj", SearchOption.TopDirectoryOnly).FirstOrDefault();
+
+            if (csprojPath == null) 
+                return string.Empty; 
+
+            var csprojContent = File.ReadAllText(csprojPath);
         
-        InitProject(_referencesMap.Values);
+            var match = System.Text.RegularExpressions.Regex.Match(csprojContent, @"<AssemblyName>(.*?)</AssemblyName>");
+            if (match.Success)
+            {
+                return match.Groups[1].Value.Trim() + ".dll";
+            }
+
+            return Path.GetFileNameWithoutExtension(csprojPath) + ".dll";
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
     
     private void LoadReferencesFromDirectory(string directoryPath)
@@ -62,13 +86,12 @@ public class LspService
         }
     }
     
-    private void InitProject(IEnumerable<MetadataReference> refs)
+    private void InitProject(IEnumerable<MetadataReference> refs, string rootPath)
     {
         var projectId = ProjectId.CreateNewId();
         
         var compilationOptions = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary);
             
-        
         var projectInfo = ProjectInfo.Create(
                 projectId, 
                 VersionStamp.Create(), 
@@ -90,40 +113,84 @@ public class LspService
             _project = _workspace.AddProject(projectInfo);
         }
         
-        var globalUsingsCode = 
+        var baseGlobalUsings = 
             @"global using System;
-      global using System.Collections.Generic;
-      global using System.IO;
-      global using System.Linq;
-      global using System.Net.Http;
-      global using System.Threading;
-      global using System.Threading.Tasks;
-      global using Microsoft.AspNetCore.Builder;
-      global using Microsoft.AspNetCore.Hosting;
-      global using Microsoft.AspNetCore.Http;
-      global using Microsoft.AspNetCore.Routing;
-      global using Microsoft.Extensions.Configuration;
-      global using Microsoft.Extensions.DependencyInjection;
-      global using Microsoft.Extensions.Hosting;
-      global using Microsoft.Extensions.Logging;
- 
-      global using Microsoft.AspNetCore.Components;
-      global using Microsoft.AspNetCore.Components.Web;
-      global using Microsoft.AspNetCore.Components.Forms;
-      global using MudBlazor; 
-      global using MudBlazor.Services;";
+              global using System.Collections.Generic;
+              global using System.IO;
+              global using System.Linq;
+              global using System.Net.Http;
+              global using System.Threading;
+              global using System.Threading.Tasks;
+              global using Microsoft.AspNetCore.Builder;
+              global using Microsoft.AspNetCore.Hosting;
+              global using Microsoft.AspNetCore.Http;
+              global using Microsoft.AspNetCore.Routing;
+              global using Microsoft.Extensions.Configuration;
+              global using Microsoft.Extensions.DependencyInjection;
+              global using Microsoft.Extensions.Hosting;
+              global using Microsoft.Extensions.Logging;
+         
+              global using Microsoft.AspNetCore.Components;
+              global using Microsoft.AspNetCore.Components.Web;
+              global using Microsoft.AspNetCore.Components.Forms;
+              global using Microsoft.JSInterop;
+              global using MudBlazor; 
+              global using MudBlazor.Services;";
+        
+        var projectFolderUsings = GenerateProjectNamespaces(rootPath);
+        var finalGlobalUsings = baseGlobalUsings + Environment.NewLine + projectFolderUsings;
         
         var docInfo = DocumentInfo.Create(
             DocumentId.CreateNewId(_project.Id),
             "GlobalUsings.g.cs", 
             filePath: "GlobalUsings.g.cs",
-            loader: TextLoader.From(TextAndVersion.Create(SourceText.From(globalUsingsCode), VersionStamp.Create()))
+            loader: TextLoader.From(TextAndVersion.Create(SourceText.From(finalGlobalUsings), VersionStamp.Create()))
         );
         
         var solution = _workspace.CurrentSolution.AddDocument(docInfo);
         _workspace.TryApplyChanges(solution);
         
         _project = _workspace.CurrentSolution.GetProject(_project.Id)!;
+    }
+    
+    private string GenerateProjectNamespaces(string rootPath)
+    {
+        var sb = new StringBuilder();
+        var rootNamespace = GetProjectAssemblyName(rootPath).Replace(".dll", ""); 
+
+        if (string.IsNullOrEmpty(rootNamespace)) return "";
+
+        sb.AppendLine("global using " + rootNamespace + ";");
+
+        var directories = Directory.GetDirectories(rootPath, "*", SearchOption.AllDirectories);
+    
+        foreach (var dir in directories)
+        {
+            if (dir.Contains($"{Path.DirectorySeparatorChar}obj") || 
+                dir.Contains($"{Path.DirectorySeparatorChar}bin") || 
+                dir.Contains(".git"))
+                continue;
+
+            if (Directory.GetFiles(dir, "*.cs").Any() || Directory.GetFiles(dir, "*.razor").Any())
+            {
+                var relativePath = Path.GetRelativePath(rootPath, dir);
+            
+                var namespaceSuffix = relativePath
+                    .Replace(Path.DirectorySeparatorChar, '.')
+                    .Replace(" ", "_")
+                    .Replace("-", "_");
+
+                if (!string.IsNullOrEmpty(namespaceSuffix))
+                {
+                    sb.AppendLine("global using " + rootNamespace + "." + namespaceSuffix + ";");
+                }
+            }
+        }
+    
+        sb.AppendLine("global using " + rootNamespace + ".Shared;");
+       // Console.WriteLine("[AUTO-IMPORT] Namespaces gerados:\n" + sb.ToString());
+    
+        return sb.ToString();
     }
     
     public async Task<List<Diagnostic>> GetDiagnosticsAsync(string code, string filePath)
@@ -348,107 +415,73 @@ public class LspService
         onProgress?.Invoke($"Loading: {rootPath}");
         
         var forbiddenDlls = GetForbiddenAssemblies(rootPath);
-    
-        if (forbiddenDlls.Count > 0)
-        {
-            Console.WriteLine($"[AUTO-DETECT] Bloqueando {forbiddenDlls.Count} DLLs de projeto para evitar conflito.");
-            foreach(var f in forbiddenDlls) Console.WriteLine($"   -> Bloqueado: {f}");
-        }
-        
         var projectRefs = new Dictionary<string, MetadataReference>(_referencesMap, StringComparer.OrdinalIgnoreCase);
         var potentialDlls = Directory.GetFiles(rootPath, "*.dll", SearchOption.AllDirectories);
         
         foreach (var dllPath in potentialDlls)
         {
-            if (dllPath.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) 
-                continue;
-            
+            if (dllPath.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
             var fileName = Path.GetFileName(dllPath);
-            
-            if (forbiddenDlls.Contains(fileName))
-            {
-                continue; 
-            }
-            
-            if (fileName.EndsWith(".Views.dll", StringComparison.OrdinalIgnoreCase)) 
-                continue;
+            if (forbiddenDlls.Contains(fileName) || fileName.EndsWith(".Views.dll", StringComparison.OrdinalIgnoreCase)) continue;
             
             if (!projectRefs.ContainsKey(fileName))
             {
-                try 
-                {
-                    var refMetadata = MetadataReference.CreateFromFile(dllPath);
-                    projectRefs[fileName] = refMetadata;
-                }
-                catch { }
+                try { projectRefs[fileName] = MetadataReference.CreateFromFile(dllPath); } catch { }
             }
         }
 
+        InitProject(projectRefs.Values, rootPath);
 
-        if (_project != null)
-        {
-            _project = _project.WithMetadataReferences(projectRefs.Values);
-            _workspace.TryApplyChanges(_project.Solution);
-        }
-
-        onProgress?.Invoke($"Total references (System + AspNet + Project): {_referencesMap.Count}");
         var files = Directory.GetFiles(rootPath, "*.cs", SearchOption.AllDirectories);
-        int fileCount = 0;
-        int totalFiles = files.Length;
-        
-        onProgress?.Invoke($"Found {totalFiles} files .cs. Starting analysis...");
+        onProgress?.Invoke($"Found {files.Length} files .cs. Scanning...");
+
+        int loadedCount = 0;
         
         foreach (var file in files)
         {
-            if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
-                continue;
+            if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
             
-            if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
+            bool isObj = file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}");
+            
+            if (isObj)
             {
-                if (!file.EndsWith(".razor.g.cs")) 
-                    continue;
+                if (!file.EndsWith(".g.cs")) continue;
+                if (file.EndsWith(".AssemblyAttributes.cs") || file.EndsWith(".AssemblyInfo.cs")) continue;
             }
-            
             else
             {
-                if (file.EndsWith(".AssemblyAttributes.cs")) 
-                    continue;
-
-                if (file.EndsWith(".g.cs") && !file.EndsWith(".razor.g.cs"))
-                    continue;
+                if (file.EndsWith(".AssemblyAttributes.cs")) continue;
+                if (file.EndsWith(".g.cs") && !file.EndsWith(".razor.g.cs")) continue;
             }
 
-            var code = File.ReadAllText(file).Replace("\r\n", "\n"); 
-            var fileName = Path.GetFileName(file);
-
-            var existingDoc = _project.Documents.FirstOrDefault(d => d.FilePath == file);
-            if (existingDoc == null)
+            try 
             {
-                var docId = DocumentId.CreateNewId(_project.Id);
-                var docInfo = DocumentInfo.Create(
-                    docId,
-                    fileName,
-                    filePath: file, 
-                    loader: TextLoader.From(TextAndVersion.Create(SourceText.From(code), VersionStamp.Create()))
-                );
+                var code = File.ReadAllText(file).Replace("\r\n", "\n"); 
+                var fileName = Path.GetFileName(file);
 
-                var solution = _workspace.CurrentSolution.AddDocument(docInfo);
-                _workspace.TryApplyChanges(solution);
-                _project = _workspace.CurrentSolution.GetProject(_project.Id)!;
+                if (!_project.Documents.Any(d => d.FilePath == file))
+                {
+                    var docInfo = DocumentInfo.Create(
+                        DocumentId.CreateNewId(_project.Id),
+                        fileName,
+                        filePath: file, 
+                        loader: TextLoader.From(TextAndVersion.Create(SourceText.From(code), VersionStamp.Create()))
+                    );
+
+                    var solution = _workspace.CurrentSolution.AddDocument(docInfo);
+                    _workspace.TryApplyChanges(solution);
+                    _project = _workspace.CurrentSolution.GetProject(_project.Id)!;
+                    loadedCount++;
+                }
             }
-            
-            fileCount++;
-            
-            if (fileCount % 10 == 0 || fileCount == totalFiles)
+            catch (Exception ex)
             {
-                int percent = (int)((float)fileCount / totalFiles * 100);
-                onProgress?.Invoke($"Indexing source files:: {fileCount}/{totalFiles} ({percent}%)");
+                Console.WriteLine($"Error loading {file}: {ex.Message}");
             }
         }
         
-        onProgress?.Invoke("LSP Ready! Project loaded successfully.");
+        onProgress?.Invoke($"LSP Ready! {loadedCount} files loaded.");
     }
-
     public async Task<SignatureHelpResult?> GetSignatureHelpAsync(string code, int cursorPosition, string filePath)
     {
         var document = UpdateDocument(code, filePath);
