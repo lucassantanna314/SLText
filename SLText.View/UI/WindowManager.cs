@@ -843,7 +843,7 @@ public class WindowManager : IDisposable
         if (_settings.OpenTabs != null && _settings.OpenTabs.Count > 0)
         {
             _tabManager.Tabs.Clear(); 
-
+            
             foreach (var filePath in _settings.OpenTabs)
             {
                 if (File.Exists(filePath))
@@ -886,6 +886,7 @@ public class WindowManager : IDisposable
         _cursor.SetPosition(0, 0);
         SyncActiveTab(true);
         _editor.SetScroll(0, 0);
+        
         UpdateTitle();
     }
     

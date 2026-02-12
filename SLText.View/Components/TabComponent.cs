@@ -16,7 +16,6 @@ public class TabComponent : IComponent
     private const float TabHeight = 35;
     
     private float _scrollX = 0;
-    public float ScrollX { get => _scrollX; set => _scrollX = value; }
 
     public TabComponent(TabManager tabManager)
     {
@@ -110,6 +109,11 @@ public class TabComponent : IComponent
 
         if (index >= 0 && index < _tabManager.Tabs.Count) return index;
         return -1;
+    }
+
+    public void ResetScroll()
+    {
+        _scrollX = 0;
     }
 
     public void ApplyScroll(float deltaX)
