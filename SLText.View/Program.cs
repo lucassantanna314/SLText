@@ -1,7 +1,9 @@
 ﻿using SLText.Core.Engine;
 using SLText.View.Services;
+using SLText.View.Styles;
 using SLText.View.UI;
 
+var settings = SettingsService.Load();
 string? fileToOpen = args.Length > 0 ? args[0] : null;
 
 var buffer = new TextBuffer();
@@ -15,6 +17,8 @@ Action<string?, bool> onFileAction = (path, isOpening) => {
     if (path != null) 
     {
         input.UpdateLastDirectory(path);
+        settings.LastRootDirectory = input.GetLastDirectory();
+        SettingsService.SaveImmediate(settings);
     }
     if (isOpening) {
         windowManager.SetCurrentFile(path); 
@@ -33,6 +37,6 @@ input = new InputHandler(
     () => windowManager.OpenSearch()
 );
 
-windowManager = new WindowManager(buffer, cursor, input, fileToOpen);
+windowManager = new WindowManager(buffer, cursor, input, fileToOpen, settings);
 
 windowManager.Run();

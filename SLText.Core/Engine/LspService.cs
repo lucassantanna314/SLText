@@ -13,7 +13,6 @@ public class LspService
     private AdhocWorkspace _workspace;
     private Project _project;
     private readonly Dictionary<string, MetadataReference> _referencesMap = new();
-    private string _rootPath = "";
     public LspService()
     {
         _workspace = new AdhocWorkspace();
@@ -127,8 +126,7 @@ public class LspService
             _project = _workspace.AddProject(projectInfo);
         }
         
-        var baseGlobalUsings = 
-            @"global using System;
+        const string baseGlobalUsings = @"global using System;
               global using System.Collections.Generic;
               global using System.IO;
               global using System.Linq;
@@ -570,14 +568,14 @@ public class SignatureHelpResult
 
 public class SignatureItem
 {
-    public string Label { get; set; }       
-    public string Documentation { get; set; } 
+    public string? Label { get; set; }       
+    public string? Documentation { get; set; } 
     public List<ParameterItem> Parameters { get; set; } = new();
 }
 
 public class ParameterItem
 {
-    public string Name { get; set; }  
-    public string Type { get; set; }  
-    public string Display { get; set; } 
+    public string? Name { get; set; }  
+    public string? Type { get; set; }  
+    public string? Display { get; set; } 
 }

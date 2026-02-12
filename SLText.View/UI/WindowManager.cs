@@ -68,8 +68,10 @@ public class WindowManager : IDisposable
     private RunService _runService = new();
     private RunConfiguration? _activeConfiguration;
     private string _lastDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-
-    private void ApplyTheme(EditorTheme theme)
+    private EditorSettings _settings;
+    private bool _isLoadingSession = true;
+    
+    public void ApplyTheme(EditorTheme theme)
     {
         _currentTheme = theme;
         _editor.SetTheme(theme);
@@ -83,7 +85,7 @@ public class WindowManager : IDisposable
         _autocomplete.ApplyTheme(theme);
     }
 
-    public WindowManager(TextBuffer buffer, CursorManager cursor, InputHandler input, string? initialFilePath = null)
+    public WindowManager(TextBuffer buffer, CursorManager cursor, InputHandler input, string? initialFilePath, EditorSettings settings)
     {
         var options = WindowOptions.Default;
         options.Size = new Silk.NET.Maths.Vector2D<int>(800, 600);
@@ -104,11 +106,12 @@ public class WindowManager : IDisposable
 
         _tabManager = new TabManager();
         _tabComponent = new TabComponent(_tabManager);
-        _tabManager.AddTab(buffer, cursor, initialFilePath);
+        _tabManager.AddTab(buffer, cursor, null);
         _editor.SetCurrentData(_tabManager.ActiveTab!.Buffer, _tabManager.ActiveTab.Cursor);        _terminal = new TerminalComponent();
         _autocomplete = new AutocompleteComponent(_editor.Font);
         _signatureHelp = new SignatureHelpComponent();
         
+        _settings = settings;
         _currentFilePath = initialFilePath;
 
         _window.Load += OnLoad;
@@ -149,6 +152,10 @@ public class WindowManager : IDisposable
                 if (!string.IsNullOrEmpty(folder))
                 {
                     _lastDirectory = folder;
+                    var settings = SettingsService.Load();
+                    settings.LastRootDirectory = folder;
+                    SettingsService.SaveImmediate(settings);
+                    
                     _explorer.SetRootDirectory(folder);
                     _explorer.IsVisible = true;
                     _terminal.SetWorkingDirectory(folder);
@@ -188,9 +195,16 @@ public class WindowManager : IDisposable
         _inputHandler.OnThemeToggleRequested += () =>
         {
             if (_currentTheme.Background.Red < 128)
+            {
                 ApplyTheme(EditorTheme.Light);
+                SyncSettings();
+            }
             else
+            {
                 ApplyTheme(EditorTheme.Dark);
+                SyncSettings();
+            }
+                
         };
 
         _inputHandler.OnNewTerminalTabRequested += () =>
@@ -293,11 +307,20 @@ public class WindowManager : IDisposable
                 }
             });
         };
+        
+        _explorer.OnFileOpenRequested += (path) => 
+        {
+            SetCurrentFile(path);
+            _explorer.IsFocused = false; 
+        };
     }
     
     private void RequestDiagnostics(bool instant = false)
     {
         _diagnosticCts?.Cancel();
+        
+        if (_lspService == null || _buffer == null || string.IsNullOrEmpty(_currentFilePath)) return;
+        if (Directory.Exists(_currentFilePath)) return;
         
         string ext = Path.GetExtension(_currentFilePath ?? "").ToLower();
         if (ext != ".cs")
@@ -311,7 +334,7 @@ public class WindowManager : IDisposable
         var token = _diagnosticCts.Token;
 
         string code = _buffer.GetAllText();
-        string path = _currentFilePath ?? "new_file.cs";
+        string path = _currentFilePath;
         string fileName = Path.GetFileName(path);
 
         _ = Task.Run(async () => 
@@ -326,10 +349,10 @@ public class WindowManager : IDisposable
 
                 var diagnostics = await _lspService.GetDiagnosticsAsync(code, path);
 
-                if (!token.IsCancellationRequested)
+                if (!token.IsCancellationRequested && diagnostics != null)
                 {
-                    _editor.SetDiagnostics(diagnostics);
-                    _terminal.ShowDiagnostics(diagnostics, fileName);
+                    _editor?.SetDiagnostics(diagnostics);
+                    _terminal?.ShowDiagnostics(diagnostics, fileName);
                 }
             }
             catch (TaskCanceledException) { /* Ignora */ }
@@ -389,6 +412,7 @@ public class WindowManager : IDisposable
 
     private void OnLoad()
     {
+        _isLoadingSession = true;
         // Inicializa Skia com o contexto da GPU da Silk.NET
         var interface_ = GRGlInterface.Create();
         _grContext = GRContext.CreateGl(interface_);
@@ -707,13 +731,9 @@ public class WindowManager : IDisposable
                         var node = _explorer.GetNodeAt(pos.X, pos.Y);
                         if (node != null)
                         {
-                            if (node.IsDirectory)
-                            {
-                                node.IsExpanded = !node.IsExpanded;
-                                if (!node.IsExpanded) _explorer.OnFolderCollapsed();
-                                if (node.IsExpanded && node.Children.Count == 0) _explorer.LoadSubNodes(node);
-                            }
-                            else
+                            _explorer.HandleMouseClick(node); 
+                
+                            if (!node.IsDirectory)
                             {
                                 SetCurrentFile(node.FullPath);
                             }
@@ -794,6 +814,9 @@ public class WindowManager : IDisposable
             if (_autocomplete.IsVisible) _autocomplete.IsVisible = false;
             if (_signatureHelp.IsVisible) _signatureHelp.IsVisible = false;
             _editor.FontSize += delta;
+            var settings = SettingsService.Load();
+            settings.FontSize = _editor.FontSize;
+            SettingsService.SaveDebounced(settings);
             _editor.RequestScrollToCursor();
         };
 
@@ -807,31 +830,63 @@ public class WindowManager : IDisposable
                 DwmSetWindowAttribute(handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDarkMode, sizeof(int));
             }
         }
+        
+        if (_settings.Theme == "Light") ApplyTheme(EditorTheme.Light);
+        else ApplyTheme(EditorTheme.Dark);
+        ApplySavedFontSize(_settings.FontSize);
+        
+        if (!string.IsNullOrEmpty(_settings.LastRootDirectory) && Directory.Exists(_settings.LastRootDirectory))
+        {
+            SetCurrentFile(_settings.LastRootDirectory);
+        }
 
+        if (_settings.OpenTabs != null && _settings.OpenTabs.Count > 0)
+        {
+            _tabManager.Tabs.Clear(); 
+
+            foreach (var filePath in _settings.OpenTabs)
+            {
+                if (File.Exists(filePath))
+                {
+                    try 
+                    {
+                        var content = File.ReadAllText(filePath).Replace("\t", "    ");
+                
+                        var buf = new TextBuffer(); 
+                        buf.LoadText(content); 
+                
+                        var cur = new CursorManager(buf);
+                        _tabManager.AddTab(buf, cur, filePath);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Erro ao restaurar aba {filePath}: {ex.Message}");
+                    }
+                }
+            }
+    
+            if (_tabManager.Tabs.Count > 0)
+            {
+                _cursor.SetPosition(0, 0);
+                _tabManager.SelectTab(0);
+            }
+        }
+        
         if (!string.IsNullOrEmpty(_currentFilePath) && File.Exists(_currentFilePath))
         {
-            try
-            {
-                string content = File.ReadAllText(_currentFilePath).Replace("\t", "    ");
-                _buffer.LoadText(content);
-                _cursor.SetPosition(0, 0);
-                _inputHandler.ResetTypingState();
-                _statusBar.LanguageName = _editor.UpdateSyntax(_currentFilePath);
-                UpdateTitle();
-            }
-            catch (Exception ex)
-            {
-                _currentFilePath = null;
-                _cursor.SetPosition(0, 0);
-            }
+            SetCurrentFile(_currentFilePath);
         }
-        else
+        
+        if (_tabManager.Tabs.Count == 0)
         {
-            _cursor.SetPosition(0, 0);
-            UpdateTitle();
+            _tabManager.AddTab(_buffer, _cursor, null);
         }
-
-        ApplyTheme(EditorTheme.Dark);
+        
+        _isLoadingSession = false;
+        _cursor.SetPosition(0, 0);
+        SyncActiveTab(true);
+        _editor.SetScroll(0, 0);
+        UpdateTitle();
     }
     
     private void ApplyAutocomplete()
@@ -871,6 +926,22 @@ public class WindowManager : IDisposable
 
         _autocomplete.IsVisible = false;
         _window.DoRender(); 
+    }
+    
+    private void SyncSettings()
+    {
+        if (_isLoadingSession) return;
+        var settings = SettingsService.Load();
+        settings.FontSize = _editor.FontSize;
+        settings.Theme = _currentTheme.Background.Red < 128 ? "Dark" : "Light";
+        settings.LastRootDirectory = _lastDirectory;
+    
+        settings.OpenTabs = _tabManager.Tabs
+            .Where(t => !string.IsNullOrEmpty(t.FilePath))
+            .Select(t => t.FilePath!)
+            .ToList();
+
+        SettingsService.SaveImmediate(settings);
     }
     
     private string GetPartialWord(string line, int column)
@@ -953,6 +1024,14 @@ public class WindowManager : IDisposable
 
     private void OnKeyDown(IKeyboard k, Key key, int arg3)
     {
+        if (_explorer.IsFocused && _explorer.IsVisible)
+        {
+            if (key == Key.Up) { _explorer.HandleKeyDown("Up"); return; }
+            if (key == Key.Down) { _explorer.HandleKeyDown("Down"); return; }
+            if (key == Key.Enter) { _explorer.HandleKeyDown("Enter"); return; }
+            if (key == Key.Escape) { _explorer.ClearSearch(); return; }
+        }
+        
         if (_signatureHelp.IsVisible)
         {
             if (key == Key.Left || key == Key.Right || key == Key.Home || key == Key.End || key == Key.PageUp || key == Key.PageDown)
@@ -1256,17 +1335,30 @@ public class WindowManager : IDisposable
 
         _statusBar.LanguageName = _editor.UpdateSyntax(path);
         UpdateTitle();
+        SyncSettings();
     }
 
     public void SetCurrentFile(string path, bool resetCursor = false)
     {
-        if (string.IsNullOrEmpty(path))
+        if (string.IsNullOrEmpty(path)) return;
+
+        if (Directory.Exists(path))
         {
-            var newBuf = new TextBuffer();
-            var newCur = new CursorManager(newBuf);
-            _tabManager.AddTab(newBuf, newCur, null);
+            _explorer.SetRootDirectory(path);
+            _explorer.ResetScroll();
+            _explorer.IsVisible = true;
+            _lastDirectory = path;
+            _terminal.SetWorkingDirectory(path);
+            _runService.ScanProject(path);
+            
+            Task.Run(() => {
+                _lspService.LoadProjectFiles(path, (msg) => _terminal.WriteOutput("Output", msg));
+            });
+            SyncSettings();
+            return; 
         }
-        else
+
+        if (File.Exists(path))
         {
             var existingTab = _tabManager.Tabs.FirstOrDefault(t => t.FilePath == path);
             if (existingTab != null)
@@ -1278,70 +1370,75 @@ public class WindowManager : IDisposable
                 if (_tabManager.Tabs.Count == 1 && string.IsNullOrEmpty(_tabManager.Tabs[0].FilePath))
                 {
                     var tab = _tabManager.Tabs[0];
-                    string content = File.ReadAllText(path).Replace("\t", "    ");
-                    tab.Buffer.LoadText(content);
+                    tab.Buffer.LoadText(File.ReadAllText(path).Replace("\t", "    "));
                     tab.FilePath = path;
                     tab.IsDirty = false;
                 }
                 else
                 {
                     var newBuffer = new TextBuffer();
-                    var newCursor = new CursorManager(newBuffer);
-                    string content = File.ReadAllText(path).Replace("\t", "    ");
-                    newBuffer.LoadText(content);
-                    _tabManager.AddTab(newBuffer, newCursor, path);
+                    newBuffer.LoadText(File.ReadAllText(path).Replace("\t", "    "));
+                    _tabManager.AddTab(newBuffer, new CursorManager(newBuffer), path);
                 }
             }
-
-            if (!_explorer.HasRoot)
-            {
-                string? dir = Path.GetDirectoryName(path);
-                if (dir != null) _explorer.SetRootDirectory(dir);
-            }
-
-            _inputHandler.UpdateLastDirectory(path);
+        
+            SyncActiveTab(resetCursor);
+            SyncSettings();
         }
-
-        SyncActiveTab(resetCursor);
     }
 
     private void SyncActiveTab(bool resetCursor)
     {
+        if (_tabManager.ActiveTab == null) return;
+    
         var active = _tabManager.ActiveTab!;
         _currentFilePath = active.FilePath;
         _buffer = active.Buffer;
         _cursor = active.Cursor;
-        _explorer.SetSelectedFile(active.FilePath);
 
-        _editor.SetCurrentData(active.Buffer, active.Cursor);
+        _explorer?.SetSelectedFile(active.FilePath);
+        _editor?.SetCurrentData(active.Buffer, active.Cursor);
+    
+        if (_editor != null)
+        {
+            if (resetCursor) 
+            {
+                _editor.SetScroll(0, 0);
+                active.SavedScrollX = 0;
+                active.SavedScrollY = 0;
+            }
+            else 
+            {
+                _editor.SetScroll(active.SavedScrollX, active.SavedScrollY);
+            }        
+            _editor.UpdateSyntax(active.FilePath);
+            if (!resetCursor) _editor.RequestScrollToCursor();
+        }
+    
+        _inputHandler?.UpdateActiveData(active.Cursor, active.Buffer);
+        _mouseHandler?.UpdateActiveCursor(active.Cursor);
+    
+        if (_statusBar != null)
+        {
+            _statusBar.UpdateActiveBuffer(active.Buffer, active.Cursor);
+            _statusBar.LanguageName = _editor?.UpdateSyntax(_currentFilePath) ?? "Plain Text";
+            _statusBar.FileInfo = active.Title;
+        }
+
+        _inputHandler?.UpdateCurrentPath(_currentFilePath);
+        if (resetCursor) active.Cursor.SetPosition(0, 0);
         
-        if (resetCursor) {
-            _editor.SetScroll(0, 0);
-        } else {
-            _editor.SetScroll(active.SavedScrollX, active.SavedScrollY);
+        if (_window.Size.X > 0)
+        {
+            _tabComponent?.EnsureActiveTabVisible();
         }
         
-        _editor.UpdateSyntax(active.FilePath);
-        _editor.RequestScrollToCursor();
-        
-        _editor.SetDiagnostics(new List<Diagnostic>());
-        _terminal.ShowDiagnostics(new List<Diagnostic>(), active.Title);
-        RequestDiagnostics(instant: true);
-        _inputHandler.UpdateActiveData(active.Cursor, active.Buffer);
-        _mouseHandler.UpdateActiveCursor(active.Cursor);
-        _statusBar.UpdateActiveBuffer(active.Buffer, active.Cursor);
-
-        _statusBar.LanguageName = _editor.UpdateSyntax(_currentFilePath);
-        _statusBar.FileInfo = active.Title;
-
-        _inputHandler.UpdateCurrentPath(_currentFilePath);
-        if (resetCursor) active.Cursor.SetPosition(0, 0);
-
-        _tabComponent.EnsureActiveTabVisible();
-
         UpdateTitle();
         
-        _editor.RequestScrollToCursor();
+        if (!_isLoadingSession && !string.IsNullOrEmpty(_currentFilePath) && File.Exists(_currentFilePath))
+        {
+            RequestDiagnostics(instant: true);
+        }
     }
 
     private StandardCursor _lastAppliedCursor = StandardCursor.Default;
@@ -1494,6 +1591,15 @@ public class WindowManager : IDisposable
         {
             SyncActiveTab(false);
         }
+        
+        SyncSettings();
+    }
+    
+    public void ApplySavedFontSize(float size)
+    {
+        if (size <= 0) size = 16f;
+        _editor.FontSize = size;
+        _editor.RequestScrollToCursor();
     }
 
     public void Run() => _window.Run();

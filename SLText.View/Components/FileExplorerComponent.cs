@@ -40,8 +40,46 @@ public class FileExplorerComponent : IComponent
     public bool IsFocused { get; set; }
     private readonly SKRect _searchBoxHeight = new(0, 0, 0, 40);
     private List<FileNode> _filteredNodes = new();
+    private List<FileNode> _flattenedVisibleNodes = new();
+    private int _kbSelectedIndex = -1;
+    public event Action<string>? OnFileOpenRequested;
+    public event Action<FileNode>? OnFolderToggleRequested;
+    private HashSet<string> _userExpandedPaths = new();
+    private static readonly string[] ForbiddenFolders = { "bin", "obj", ".git", ".vs", "node_modules" };
+    public void SetSelectedFile(string? path) 
+    {
+        _selectedFilePath = path;
+        if (IsVisible) ExpandToPath(path);
+    }
     
-    public void SetSelectedFile(string? path) => _selectedFilePath = path;
+    private void ToggleNodeExpansion(FileNode node, bool expand)
+    {
+        node.IsExpanded = expand;
+        if (expand)
+        {
+            _userExpandedPaths.Add(node.FullPath);
+            if (node.Children.Count == 0) LoadSubNodes(node);
+        }
+        else
+        {
+            _userExpandedPaths.Remove(node.FullPath);
+        }
+        UpdateFlattenedNodes();
+    }
+    
+    public void HandleMouseClick(FileNode node)
+    {
+        if (node.IsDirectory)
+        {
+            ToggleNodeExpansion(node, !node.IsExpanded);
+        
+            if (!node.IsExpanded) OnFolderCollapsed();
+        }
+        else
+        {
+            SetSelectedFile(node.FullPath);
+        }
+    }
     
     public void HandleSearchInput(string text, bool backspace)
     {
@@ -55,16 +93,124 @@ public class FileExplorerComponent : IComponent
         }
         ApplyFilter();
     }
+
+    public void HandleKeyDown(string key)
+    {
+        UpdateFlattenedNodes();
+
+        switch (key)
+        {
+            case "Down":
+                _kbSelectedIndex = Math.Min(_kbSelectedIndex + 1, _flattenedVisibleNodes.Count - 1);
+                EnsureSelectionVisible();
+                break;
+            
+            case "Up":
+                _kbSelectedIndex = Math.Max(_kbSelectedIndex - 1, 0);
+                EnsureSelectionVisible();
+                break;
+            
+            case "Enter":
+                if (_kbSelectedIndex >= 0 && _kbSelectedIndex < _flattenedVisibleNodes.Count)
+                {
+                    var node = _flattenedVisibleNodes[_kbSelectedIndex];
+                    if (node.IsDirectory)
+                    {
+                        ToggleNodeExpansion(node, !node.IsExpanded);
+                        UpdateFlattenedNodes();
+                    }
+                    else
+                    {
+                        _selectedFilePath = node.FullPath;
+                        OnFileOpenRequested?.Invoke(node.FullPath);
+                        ClearSearch();
+                    }
+                }
+                break;
+            
+            case "Escape":
+                IsFocused = false;
+                break;
+        }
+    }
+    
+    public void ResetScroll()
+    {
+        _scrollY = 0;
+        _scrollX = 0;
+    }
+    
+    private void UpdateFlattenedNodes()
+    {
+        _flattenedVisibleNodes.Clear();
+        var source = string.IsNullOrEmpty(_searchText) ? _rootNodes : _filteredNodes;
+        foreach (var node in source)
+        {
+            FlattenRecursive(node);
+        }
+    }
+    
+    private void EnsureSelectionVisible()
+    {
+        if (_kbSelectedIndex < 0) return;
+
+        float targetY = 60 + (_kbSelectedIndex * ItemHeight);
+        float viewTop = _scrollY;
+        float viewBottom = _scrollY + Bounds.Height - 60;
+
+        if (targetY < viewTop)
+        {
+            _scrollY = targetY - 20;
+        }
+        else if (targetY + ItemHeight > viewBottom)
+        {
+            _scrollY = targetY - Bounds.Height + ItemHeight + 40;
+        }
+    
+        _scrollY = Math.Max(0, _scrollY);
+    }
+    
+    private void FlattenRecursive(FileNode node)
+    {
+        _flattenedVisibleNodes.Add(node);
+        if (node.IsDirectory && node.IsExpanded)
+        {
+            foreach (var child in node.Children)
+                FlattenRecursive(child);
+        }
+    }
     
     private void ApplyFilter()
     {
         if (string.IsNullOrEmpty(_searchText))
         {
             _filteredNodes = _rootNodes;
-            return;
+            _kbSelectedIndex = -1; 
+        }
+        else
+        {
+            _filteredNodes = FilterRecursive(_rootNodes, _searchText.ToLower());
+        
+            UpdateFlattenedNodes();
+        
+            _kbSelectedIndex = -1;
+            for (int i = 0; i < _flattenedVisibleNodes.Count; i++)
+            {
+                if (_flattenedVisibleNodes[i].Name.Contains(_searchText, StringComparison.OrdinalIgnoreCase))
+                {
+                    _kbSelectedIndex = i;
+                    break;
+                }
+            }
+
+            if (_kbSelectedIndex == -1 && _flattenedVisibleNodes.Count > 0)
+            {
+                _kbSelectedIndex = 0;
+            }
         }
 
-        _filteredNodes = FilterRecursive(_rootNodes, _searchText.ToLower());
+        EnsureSelectionVisible();
+        _scrollY = 0; 
     }
     
     private List<FileNode> FilterRecursive(List<FileNode> nodes, string query)
@@ -72,22 +218,70 @@ public class FileExplorerComponent : IComponent
         var result = new List<FileNode>();
         foreach (var node in nodes)
         {
+            if (node.IsDirectory && ForbiddenFolders.Contains(node.Name.ToLower()))
+                continue;
+            
             bool matches = node.Name.ToLower().Contains(query);
-            List<FileNode> matchedChildren = new();
-
+        
             if (node.IsDirectory)
             {
-                matchedChildren = FilterRecursive(node.Children, query);
-            }
+                if (node.Children.Count == 0) LoadSubNodes(node);
 
-            if (matches || matchedChildren.Count > 0)
+                var matchedChildren = FilterRecursive(node.Children, query);
+
+                if (matches || matchedChildren.Count > 0)
+                {
+                    node.IsExpanded = true; 
+                    result.Add(node);
+                }
+                else
+                {
+                    node.IsExpanded = _userExpandedPaths.Contains(node.FullPath);
+                }
+            }
+            else if (matches)
             {
-                if (matchedChildren.Count > 0) node.IsExpanded = true;
                 result.Add(node);
             }
-            
         }
         return result;
+    }
+    
+    public void ExpandToPath(string? fullPath)
+    {
+        if (string.IsNullOrEmpty(fullPath) || string.IsNullOrEmpty(_currentRootPath)) return;
+        if (!fullPath.StartsWith(_currentRootPath)) return;
+
+        string relativePath = Path.GetRelativePath(_currentRootPath, fullPath);
+        string[] parts = relativePath.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+
+        List<FileNode> currentLevel = _rootNodes;
+
+        foreach (var part in parts)
+        {
+            var foundNode = currentLevel.FirstOrDefault(n => n.Name.Equals(part, StringComparison.OrdinalIgnoreCase));
+        
+            if (foundNode != null)
+            {
+                if (foundNode.IsDirectory)
+                {
+                    foundNode.IsExpanded = true;
+                    _userExpandedPaths.Add(foundNode.FullPath); 
+                
+                    if (foundNode.Children.Count == 0) LoadSubNodes(foundNode);
+                    currentLevel = foundNode.Children;
+                }
+            
+                if (foundNode.FullPath == fullPath)
+                {
+                    _selectedFilePath = foundNode.FullPath;
+                    UpdateFlattenedNodes();
+                    _kbSelectedIndex = _flattenedVisibleNodes.IndexOf(foundNode);
+                    EnsureSelectionVisible();
+                    break;
+                }
+            }
+        }
     }
     
     public void SetRootDirectory(string path)
@@ -129,7 +323,6 @@ public class FileExplorerComponent : IComponent
     public void Refresh()
     {
         if (string.IsNullOrEmpty(_currentRootPath)) return;
-        
         _rootNodes.Clear();
         var entries = Directory.GetFileSystemEntries(_currentRootPath)
             .OrderByDescending(e => Directory.Exists(e))
@@ -137,8 +330,32 @@ public class FileExplorerComponent : IComponent
 
         foreach (var entry in entries)
         {
-            _rootNodes.Add(new FileNode(entry, 0));
+            var newNode = new FileNode(entry, 0);
+        
+            if (_userExpandedPaths.Contains(newNode.FullPath))
+            {
+                newNode.IsExpanded = true;
+                LoadSubNodes(newNode);
+                RestoreExpansionState(newNode.Children); 
+            }
+            _rootNodes.Add(newNode);
         }
+        
+        UpdateFlattenedNodes();
+    }
+    
+    private HashSet<string> GetExpandedPaths(List<FileNode> nodes)
+    {
+        var expanded = new HashSet<string>();
+        foreach (var node in nodes)
+        {
+            if (node.IsDirectory && node.IsExpanded)
+            {
+                expanded.Add(node.FullPath);
+                expanded.UnionWith(GetExpandedPaths(node.Children));
+            }
+        }
+        return expanded;
     }
 
     public FileExplorerComponent()
@@ -175,7 +392,8 @@ public class FileExplorerComponent : IComponent
     {
         if (!IsVisible) return;
         _maxContentWidth = 0;
-
+        UpdateFlattenedNodes();
+        
         using var paint = new SKPaint { Color = _theme.ExplorerBackground };
         canvas.DrawRect(Bounds, paint);
         
@@ -197,7 +415,7 @@ public class FileExplorerComponent : IComponent
         canvas.Save();
         var listBounds = new SKRect(Bounds.Left, Bounds.Top + 40, Bounds.Right, Bounds.Bottom);
         canvas.ClipRect(listBounds);
-        canvas.Translate(-_scrollX, -_scrollY);
+        canvas.Translate(0, -_scrollY);
         
         float yOffset = Bounds.Top + 60;
         
@@ -211,70 +429,82 @@ public class FileExplorerComponent : IComponent
         DrawScrollbars(canvas);
         
         paint.Color = _theme.LineHighlight.WithAlpha(120);
+        paint.Style = SKPaintStyle.Stroke;
         canvas.DrawLine(Bounds.Right, Bounds.Top, Bounds.Right, Bounds.Bottom, paint);
     }
     
     private void RenderNode(SKCanvas canvas, FileNode node, ref float y, SKPaint paint)
     {
-        float relativeY = y - ScrollY;
         float xOffset = Bounds.Left + 15 + (node.Level * 20); 
-        
         float textWidth = paint.MeasureText(node.Name);
         _maxContentWidth = Math.Max(_maxContentWidth, xOffset + textWidth + 50);
-
-        if (relativeY >= Bounds.Top - ItemHeight && relativeY <= Bounds.Bottom + ItemHeight)
+        
+        bool isKbSelected = _kbSelectedIndex >= 0 && 
+                            _kbSelectedIndex < _flattenedVisibleNodes.Count && 
+                            _flattenedVisibleNodes[_kbSelectedIndex] == node;
+        
+        if (isKbSelected)
         {
-            if (node.FullPath == _selectedFilePath)
-            {
-                using var selectPaint = new SKPaint { Color = _theme.ExplorerSelection };
-                canvas.DrawRect(new SKRect(Bounds.Left, y - 18, Bounds.Right, y + 7), selectPaint);
-                
-                selectPaint.Color = _theme.ExplorerItemActive;
-                canvas.DrawRect(new SKRect(Bounds.Left, y - 18, Bounds.Left + 3, y + 7), selectPaint);
-            }
-
-            using var iconPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
-            if (node.IsDirectory)
-                DrawFolderIcon(canvas, xOffset, y, node.IsExpanded, iconPaint);
-            else
-                DrawFileIcon(canvas, xOffset, y, node.Name, iconPaint);
+            using var kbPaint = new SKPaint { Color = _theme.ExplorerSelection.WithAlpha(100) };
+            var kbRect = new SKRect(Bounds.Left, y - 18, Bounds.Right, y + 7);
+            canvas.DrawRect(kbRect, kbPaint);
             
-            //highlight
-            float currentX = xOffset + 20;
-            string name = node.Name;
-            string query = _searchText.ToLower();
-
-            if (!string.IsNullOrEmpty(query) && name.ToLower().Contains(query))
-            {
-                int startIndex = name.ToLower().IndexOf(query);
-
-                string prefix = name.Substring(0, startIndex);
-                canvas.DrawText(prefix, currentX, y, _font, paint);
-                currentX += _font.MeasureText(prefix);
-                
-                string match = name.Substring(startIndex, query.Length);
-                using (var highlightPaint = new SKPaint { Color = _theme.LineHighlight.WithAlpha(180) })
-                {
-                    var highlightRect = new SKRect(currentX, y - 13, currentX + _font.MeasureText(match), y + 3);
-                    canvas.DrawRect(highlightRect, highlightPaint);
-                }
-                
-                canvas.DrawText(match, currentX, y, _font, paint);
-                currentX += _font.MeasureText(match);
-                
-                string suffix = name.Substring(startIndex + query.Length);
-                canvas.DrawText(suffix, currentX, y, _font, paint);
-                
+            if (IsFocused) {
+                kbPaint.Style = SKPaintStyle.Stroke;
+                kbPaint.Color = _theme.ExplorerItemActive.WithAlpha(150);
+                canvas.DrawRect(kbRect, kbPaint);
+                kbPaint.Style = SKPaintStyle.Fill;
             }
-            else
-            {
-                paint.Color = node.FullPath == _selectedFilePath ? SKColors.White : _theme.Foreground;
-                canvas.DrawText(node.Name, xOffset + 20, y, _font, paint); 
-            }
-            
-            
         }
+        if (node.FullPath == _selectedFilePath)
+        {
+            using var selectPaint = new SKPaint { Color = _theme.ExplorerSelection };
+            canvas.DrawRect(new SKRect(Bounds.Left, y - 18, Bounds.Right, y + 7), selectPaint);
+            
+            selectPaint.Color = _theme.ExplorerItemActive;
+            canvas.DrawRect(new SKRect(Bounds.Left, y - 18, Bounds.Left + 3, y + 7), selectPaint);
+        }
+        
+        using var iconPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
+        if (node.IsDirectory)
+            DrawFolderIcon(canvas, xOffset, y, node.IsExpanded, iconPaint);
+        else
+            DrawFileIcon(canvas, xOffset, y, node.Name, iconPaint);
+        
+        float currentX = xOffset + 20;
+        string name = node.Name;
+        string query = _searchText.ToLower();
 
+        if (!string.IsNullOrEmpty(query) && name.ToLower().Contains(query))
+        {
+            int startIndex = name.ToLower().IndexOf(query);
+            
+            string prefix = name.Substring(0, startIndex);
+            paint.Color = _theme.Foreground;
+            canvas.DrawText(prefix, currentX, y, _font, paint);
+            currentX += _font.MeasureText(prefix);
+            
+            string match = name.Substring(startIndex, _searchText.Length);
+            using (var highlightPaint = new SKPaint { Color = _theme.LineHighlight.WithAlpha(180) })
+            {
+                var highlightRect = new SKRect(currentX, y - 13, currentX + _font.MeasureText(match), y + 3);
+                canvas.DrawRect(highlightRect, highlightPaint);
+            }
+            paint.Color = _theme.ExplorerItemActive; 
+            canvas.DrawText(match, currentX, y, _font, paint);
+            currentX += _font.MeasureText(match);
+            
+            string suffix = name.Substring(startIndex + _searchText.Length);
+            paint.Color = _theme.Foreground;
+            canvas.DrawText(suffix, currentX, y, _font, paint);
+        }
+        else
+        {
+            paint.Color = node.FullPath == _selectedFilePath ? SKColors.White : _theme.Foreground;
+            canvas.DrawText(node.Name, currentX, y, _font, paint);
+        }
+        
+        
         y += ItemHeight;
 
         if (node.IsDirectory && node.IsExpanded)
@@ -384,7 +614,29 @@ public class FileExplorerComponent : IComponent
         _searchText = "";
         IsFocused = false;
         _scrollY = 0; 
-        Refresh();   
+        RestoreExpansionState(_rootNodes);
+        _filteredNodes = _rootNodes; 
+        UpdateFlattenedNodes();
+    }
+    
+    private void RestoreExpansionState(List<FileNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            if (_userExpandedPaths.Contains(node.FullPath))
+            {
+                node.IsExpanded = true;
+            
+                if (node.Children.Count == 0) LoadSubNodes(node); 
+            
+                if (node.Children.Count > 0)
+                    RestoreExpansionState(node.Children);
+            }
+            else
+            {
+                node.IsExpanded = false;
+            }
+        }
     }
     
     public void OnMouseDown(float x, float y)
