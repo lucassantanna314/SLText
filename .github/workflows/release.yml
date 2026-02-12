@@ -13,14 +13,23 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0
+          dotnet-version: 10.0
 
       - name: Restore
         run: dotnet restore
 
       - name: Publish Linux
-        run: dotnet publish SLText.View/SLText.View.csproj -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -o ./publish/linux
-
+        run: >
+          dotnet publish SLText.View/SLText.View.csproj 
+          -c Release 
+          -r linux-x64 
+          --self-contained true 
+          -p:PublishSingleFile=true 
+          -p:IncludeNativeLibrariesForSelfExtract=true 
+          -p:IncludeAllContentForSelfExtract=true 
+          -p:EnableCompressionInSingleFile=false 
+          -o ./publish/linux
+          
       - name: Create .DEB Package
         run: |
           VERSION="0.${{ github.run_number }}"
