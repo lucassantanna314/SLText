@@ -30,13 +30,16 @@ public class LspService
             }
         }
         
-        var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location);
-        if (runtimeDir != null)
+        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
         {
-            foreach (var dll in Directory.GetFiles(runtimeDir, "*.dll"))
+            try
             {
-                AddReference(dll);
+                if (!assembly.IsDynamic && !string.IsNullOrWhiteSpace(assembly.Location))
+                {
+                    AddReference(assembly.Location);
+                }
             }
+            catch { /*  */ }
         }
         
         var appDir = AppDomain.CurrentDomain.BaseDirectory;
