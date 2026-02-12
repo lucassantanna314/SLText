@@ -17,18 +17,33 @@ public class LspService
     {
         _workspace = new AdhocWorkspace();
     
-        var assemblyLocation = typeof(object).Assembly.Location;
-        if (string.IsNullOrEmpty(assemblyLocation))
-        {
-            assemblyLocation = Path.Combine(RuntimeEnvironment.GetRuntimeDirectory(), "System.Runtime.dll");
-        }
-
-        var coreDir = Path.GetDirectoryName(assemblyLocation);
-        if (coreDir != null)
-        {
-            LoadReferencesFromDirectory(coreDir);
+        var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location);
         
-            var coreParent = Directory.GetParent(coreDir); 
+        if (runtimeDir != null)
+        {
+            string[] coreLibraries = {
+                "System.Runtime.dll",
+                "mscorlib.dll",
+                "System.Console.dll",
+                "System.Collections.dll",
+                "System.Linq.dll",
+                "netstandard.dll",
+                "System.Private.CoreLib.dll"
+            };
+
+            foreach (var lib in coreLibraries)
+            {
+                var path = Path.Combine(runtimeDir, lib);
+                if (File.Exists(path))
+                {
+                    var reference = MetadataReference.CreateFromFile(path);
+                    _referencesMap[lib] = reference;
+                }
+            }
+            
+            LoadReferencesFromDirectory(runtimeDir);
+        
+            var coreParent = Directory.GetParent(runtimeDir); 
             var sharedParent = coreParent?.Parent;         
             var dotnetRoot = sharedParent?.Parent?.FullName; 
 
