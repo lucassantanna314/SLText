@@ -35,10 +35,4 @@
     <AssemblyName>SLText</AssemblyName>
   </PropertyGroup>
 
-  <PropertyGroup>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
-    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
-  </PropertyGroup>
-
 </Project>
