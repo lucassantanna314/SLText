@@ -14,9 +14,13 @@ public static class SettingsService
 {
     private static string GetSettingsPath()
     {
-        var baseDir = AppContext.BaseDirectory;
+        string userConfigDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), 
+            "SLText"
+        );
 
 #if DEBUG
+        var baseDir = AppContext.BaseDirectory;
         var projectRoot = Path.Combine(baseDir, "..", "..", "..");
         var sourceAssets = Path.Combine(projectRoot, "Assets");
 
@@ -26,7 +30,12 @@ public static class SettingsService
         }
 #endif
 
-        return Path.Combine(baseDir, "Assets", "settings.json");
+        if (!Directory.Exists(userConfigDir))
+        {
+            Directory.CreateDirectory(userConfigDir);
+        }
+
+        return Path.Combine(userConfigDir, "settings.json");
     }
 
     private static readonly string SettingsPath = GetSettingsPath();
