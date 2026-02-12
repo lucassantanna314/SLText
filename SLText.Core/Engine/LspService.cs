@@ -21,27 +21,39 @@ public class LspService
     private void LoadMetadataReferences()
     {
         var trustedAssemblies = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
+        
         if (!string.IsNullOrEmpty(trustedAssemblies))
         {
-            var separator = Path.PathSeparator;
-            var paths = trustedAssemblies.Split(separator);
-
-            foreach (var path in paths)
+            foreach (var path in trustedAssemblies.Split(Path.PathSeparator))
             {
-                var fileName = Path.GetFileName(path);
-                if (!_referencesMap.ContainsKey(fileName))
-                {
-                    try 
-                    {
-                        _referencesMap[fileName] = MetadataReference.CreateFromFile(path);
-                    }
-                    catch { /*  */ }
-                }
+                AddReference(path);
+            }
+        }
+        
+        var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location);
+        if (runtimeDir != null)
+        {
+            foreach (var dll in Directory.GetFiles(runtimeDir, "*.dll"))
+            {
+                AddReference(dll);
             }
         }
         
         var appDir = AppDomain.CurrentDomain.BaseDirectory;
         LoadReferencesFromDirectory(appDir);
+    }
+    
+    private void AddReference(string path)
+    {
+        var fileName = Path.GetFileName(path);
+        if (!_referencesMap.ContainsKey(fileName) && File.Exists(path))
+        {
+            try 
+            {
+                _referencesMap[fileName] = MetadataReference.CreateFromFile(path);
+            }
+            catch { /* */ }
+        }
     }
 
     private string GetProjectAssemblyName(string rootPath)
