@@ -20,13 +20,13 @@ public class LspService
 
     private void LoadMetadataReferences()
     {
+        var loadedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);        
         var trustedAssemblies = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
-        
         if (!string.IsNullOrEmpty(trustedAssemblies))
         {
             foreach (var path in trustedAssemblies.Split(Path.PathSeparator))
             {
-                AddReference(path);
+                if (AddReference(path)) loadedPaths.Add(Path.GetFileName(path));
             }
         }
         
@@ -36,27 +36,42 @@ public class LspService
             {
                 if (!assembly.IsDynamic && !string.IsNullOrWhiteSpace(assembly.Location))
                 {
-                    AddReference(assembly.Location);
+                    if (AddReference(assembly.Location)) loadedPaths.Add(Path.GetFileName(assembly.Location));
                 }
             }
-            catch { /*  */ }
+            catch { }
         }
         
-        var appDir = AppDomain.CurrentDomain.BaseDirectory;
-        LoadReferencesFromDirectory(appDir);
+        if (!loadedPaths.Contains("System.Private.CoreLib.dll"))
+        {
+            var runtimeDir = System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory();
+            if (Directory.Exists(runtimeDir))
+            {
+                foreach (var dll in Directory.GetFiles(runtimeDir, "*.dll"))
+                {
+                    AddReference(dll);
+                }
+            }
+        }
+        
+        LoadReferencesFromDirectory(AppDomain.CurrentDomain.BaseDirectory);
     }
     
-    private void AddReference(string path)
+    private bool AddReference(string path)
     {
+        if (string.IsNullOrEmpty(path) || !File.Exists(path)) return false;
+    
         var fileName = Path.GetFileName(path);
-        if (!_referencesMap.ContainsKey(fileName) && File.Exists(path))
+        if (!_referencesMap.ContainsKey(fileName))
         {
             try 
             {
                 _referencesMap[fileName] = MetadataReference.CreateFromFile(path);
+                return true;
             }
-            catch { /* */ }
+            catch { return false; }
         }
+        return true;
     }
 
     private string GetProjectAssemblyName(string rootPath)

@@ -418,6 +418,8 @@ public class WindowManager : IDisposable
         _grContext = GRContext.CreateGl(interface_);
         SetupSurface();
         SetWindowIcon();
+        
+        
 
         // Configura Input da Silk.NET
         var input = _window.CreateInput();
