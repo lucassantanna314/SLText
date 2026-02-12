@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
@@ -16,56 +15,35 @@ public class LspService
     public LspService()
     {
         _workspace = new AdhocWorkspace();
-    
-        var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location);
-        
-        if (runtimeDir != null)
+        LoadMetadataReferences();
+    }
+
+    private void LoadMetadataReferences()
+    {
+        var trustedAssemblies = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
+        if (!string.IsNullOrEmpty(trustedAssemblies))
         {
-            string[] coreLibraries = {
-                "System.Runtime.dll",
-                "mscorlib.dll",
-                "System.Console.dll",
-                "System.Collections.dll",
-                "System.Linq.dll",
-                "netstandard.dll",
-                "System.Private.CoreLib.dll"
-            };
+            var separator = Path.PathSeparator;
+            var paths = trustedAssemblies.Split(separator);
 
-            foreach (var lib in coreLibraries)
+            foreach (var path in paths)
             {
-                var path = Path.Combine(runtimeDir, lib);
-                if (File.Exists(path))
+                var fileName = Path.GetFileName(path);
+                if (!_referencesMap.ContainsKey(fileName))
                 {
-                    var reference = MetadataReference.CreateFromFile(path);
-                    _referencesMap[lib] = reference;
-                }
-            }
-            
-            LoadReferencesFromDirectory(runtimeDir);
-        
-            var coreParent = Directory.GetParent(runtimeDir); 
-            var sharedParent = coreParent?.Parent;         
-            var dotnetRoot = sharedParent?.Parent?.FullName; 
-
-            if (dotnetRoot != null)
-            {
-                var aspNetCoreRoot = Path.Combine(dotnetRoot, "Microsoft.AspNetCore.App");
-                if (Directory.Exists(aspNetCoreRoot))
-                {
-                    var latestVersion = Directory.GetDirectories(aspNetCoreRoot)
-                        .OrderByDescending(d => d)
-                        .FirstOrDefault();
-
-                    if (latestVersion != null)
+                    try 
                     {
-                        LoadReferencesFromDirectory(latestVersion);
-                        Console.WriteLine($"[LSP] ASP.NET Core Framework carregado de: {latestVersion}");
+                        _referencesMap[fileName] = MetadataReference.CreateFromFile(path);
                     }
+                    catch { /*  */ }
                 }
             }
         }
+        
+        var appDir = AppDomain.CurrentDomain.BaseDirectory;
+        LoadReferencesFromDirectory(appDir);
     }
-    
+
     private string GetProjectAssemblyName(string rootPath)
     {
         try
