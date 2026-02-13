@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using SkiaSharp;
 using SLText.Core.Engine;
+using SLText.Core.Engine.LSP;
 using SLText.View.Styles;
 
 namespace SLText.View.Components.Canvas;
@@ -13,7 +14,7 @@ public class GutterRenderer
     private readonly SKPaint _backgroundPaint = new() { IsAntialias = true };
     private readonly SKPaint _textPaint = new() { IsAntialias = true };
     private static readonly Regex TestAttributeRegex = new Regex(@"\[(Test|Fact|TestMethod|TestClass)\]", RegexOptions.Compiled);
-    private List<Diagnostic> _diagnostics = new();
+    private List<LspService.MappedDiagnostic> _diagnostics = new();
     public GutterRenderer(SKFont font, EditorTheme theme)
     {
         _font = font;
@@ -26,9 +27,7 @@ public class GutterRenderer
         _theme = theme;
         UpdatePaints();
     }
-    
-    public void SetDiagnostics(List<Diagnostic> diags) => _diagnostics = diags;
-
+    public void SetDiagnostics(List<LspService.MappedDiagnostic> diags) => _diagnostics = diags;
     private void UpdatePaints()
     {
         _backgroundPaint.Color = _theme.GutterBackground;
@@ -63,7 +62,7 @@ public class GutterRenderer
             if (yPos < bounds.Top - lineHeight) continue;
             
             bool hasMissingReference = _diagnostics.Any(d => 
-                d.Location.GetLineSpan().StartLinePosition.Line == lineIndex && 
+                d.Line == lineNum && 
                 d.Id == "CS0246");
 
             if (hasMissingReference)

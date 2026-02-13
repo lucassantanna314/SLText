@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis;
 using Silk.NET.Input;
 using SkiaSharp;
 using SLText.Core.Engine;
+using SLText.Core.Engine.LSP;
 using SLText.View.Abstractions;
 using SLText.View.Styles;
 
@@ -68,7 +69,7 @@ public class TerminalComponent : IComponent
         CreateNewTab("bash", forceNew: true);
     }
     
-    public void ShowDiagnostics(List<Diagnostic> diagnostics, string fileName)
+    public void ShowDiagnostics(List<LspService.MappedDiagnostic> diagnostics, string fileName)
     {
         if (diagnostics.Any() && !IsVisible) IsVisible = true;
 
@@ -102,10 +103,8 @@ public class TerminalComponent : IComponent
 
                 foreach (var diag in diagnostics)
                 {
-                    var line = diag.Location.GetLineSpan().StartLinePosition.Line + 1;
                     string severity = diag.Severity == DiagnosticSeverity.Error ? "[ERROR]" : "[WARN]";
-                    
-                    string message = $" {severity} Line {line}: {diag.GetMessage()} ({diag.Id})";
+                    string message = $" {severity} Line {diag.Line}: {diag.Message} ({diag.Id})";
                     problemsTab.OutputLines.Add(message);
                 }
             }
