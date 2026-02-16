@@ -1,5 +1,6 @@
 using SkiaSharp;
 using SLText.Core.Engine;
+using SLText.Core.Engine.LSP;
 using SLText.View.Styles;
 
 namespace SLText.View.Components;

@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using SkiaSharp;
 using SLText.Core.Engine;
+using SLText.Core.Engine.LSP;
 using SLText.Core.Engine.Model;
 using SLText.Core.Interfaces;
 using SLText.View.Abstractions;
@@ -48,24 +49,12 @@ public class EditorComponent : IComponent, IZoomable
     public event Action<int, string>? OnQuickFixRequested;
     private static readonly Regex TestAttributeRegex = new Regex(@"\[(Test|Fact|TestMethod|TestClass)\]", RegexOptions.Compiled);
     
-    private List<Diagnostic> _diagnostics = new();
+    private List<LspService.MappedDiagnostic> _diagnostics = new();
     
-    public void SetDiagnostics(List<Diagnostic> diagnostics) 
+    public void SetDiagnostics(List<LspService.MappedDiagnostic> diagnostics)
     {
         _diagnostics = diagnostics;
         _gutterRenderer.SetDiagnostics(diagnostics);
-        //if (diagnostics.Any())
-        //{
-        //    Console.WriteLine($"\n--- [RELATÓRIO LSP] {diagnostics.Count} Erros Encontrados ---");
-            
-        //    foreach (var diag in diagnostics)
-        //    {
-        //        var line = diag.Location.GetLineSpan().StartLinePosition.Line + 1;
-        //        Console.WriteLine($"   🔴 [{diag.Id}] Linha {line}: {diag.GetMessage()}");
-         //   }
-        
-        //    Console.WriteLine("----------------------------------------------------------\n");
-       // }
     }
     
     public EditorComponent(TextBuffer buffer, CursorManager cursor)
@@ -94,8 +83,8 @@ public class EditorComponent : IComponent, IZoomable
     {
         if (_diagnostics == null || _diagnostics.Count == 0) return;
 
-        var lineErrors = _diagnostics.Where(d => d.Location.GetLineSpan().StartLinePosition.Line == lineIndex);
-
+        var lineErrors = _diagnostics.Where(d => d.Line == lineIndex + 1);
+        
         using var paint = new SKPaint
         {
             Color = SKColors.Red,
@@ -107,19 +96,15 @@ public class EditorComponent : IComponent, IZoomable
 
         foreach (var diag in lineErrors)
         {
-            var span = diag.Location.GetLineSpan();
             string lineText = _buffer.GetLine(lineIndex);
 
-            int startChar = Math.Clamp(span.StartLinePosition.Character, 0, lineText.Length);
-            int endChar = Math.Clamp(span.EndLinePosition.Character, 0, lineText.Length);
-        
+            int startChar = Math.Clamp(diag.CharacterStart, 0, lineText.Length);
+            int endChar = Math.Clamp(diag.CharacterEnd, 0, lineText.Length);
+    
             float startX = _font.MeasureText(lineText.Substring(0, startChar));
             float endX = _font.MeasureText(lineText.Substring(0, endChar));
 
-            if (endX - startX < 4) 
-            {
-                endX = startX + 8; 
-            }
+            if (endX - startX < 4) endX = startX + 8; 
 
             canvas.DrawLine(textX + startX, yPos + 3, textX + endX, yPos + 3, paint);
         }
@@ -307,15 +292,17 @@ public class EditorComponent : IComponent, IZoomable
             }
             
             var error = _diagnostics.FirstOrDefault(d => 
-                d.Location.GetLineSpan().StartLinePosition.Line == line && 
+                d.Line == line + 1 && 
                 d.Id == "CS0246");
             
             if (error != null)
             {
-                var span = error.Location.SourceSpan;
-                string textWithError = _buffer.GetTextInRange(span.Start, span.Length);
-                
-                OnQuickFixRequested?.Invoke(line, textWithError);
+                int length = error.CharacterEnd - error.CharacterStart;
+                if (length > 0)
+                {
+                    string textWithError = lineContent.Substring(error.CharacterStart, length);
+                    OnQuickFixRequested?.Invoke(line, textWithError);
+                }
             }
         }
         EnsureCursorVisible();
