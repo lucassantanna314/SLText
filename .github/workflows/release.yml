@@ -153,7 +153,6 @@ jobs:
             --after-install /dev/null \
             --rpm-posttrans /dev/null \
             --rpm-digest sha256 \
-            --rpm-file-attributes +exempted \
             --epochs 0 \
             --category "Application/TextEditor" \
             ./publish/linux/=usr/bin/ \
