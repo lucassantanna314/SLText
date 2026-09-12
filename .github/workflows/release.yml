@@ -153,7 +153,6 @@ jobs:
             --after-install /dev/null \
             --rpm-posttrans /dev/null \
             --rpm-digest sha256 \
-            --epochs 0 \
             --category "Application/TextEditor" \
             ./publish/linux/=usr/bin/ \
             sltext.desktop=/usr/share/applications/sltext.desktop \
