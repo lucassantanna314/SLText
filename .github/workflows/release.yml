@@ -87,16 +87,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install ICU library
-        run: dnf install -y libicu
+      - name: Install dependencies
+        run: dnf install -y libicu rpm-build ruby-devel rubygem-fpm
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0
-
-      - name: Install rpm-build
-        run: dnf install -y rpm-build
 
       - name: Restore
         run: dotnet restore
@@ -113,29 +110,9 @@ jobs:
           -p:EnableCompressionInSingleFile=false
           -o ./publish/linux
 
-      - name: Create .RPM Package
+      - name: Create .desktop file
         run: |
-          VERSION="0.${{ github.run_number }}"
-          mkdir -p sltext-rpm/BUILD
-          mkdir -p sltext-rpm/SOURCES
-          mkdir -p sltext-rpm/SPECS
-          mkdir -p sltext-rpm/tmp_install/usr/bin
-          mkdir -p sltext-rpm/tmp_install/usr/share/applications
-          mkdir -p sltext-rpm/tmp_install/usr/share/icons/hicolor/256x256/apps
-          mkdir -p sltext-rpm/tmp_install/usr/share/metainfo
-
-          cp -r ./publish/linux/* sltext-rpm/tmp_install/usr/bin/
-
-          if [ -f "sltext-rpm/tmp_install/usr/bin/SLText" ]; then
-              mv sltext-rpm/tmp_install/usr/bin/SLText sltext-rpm/tmp_install/usr/bin/sltext
-          fi
-
-          chmod +x sltext-rpm/tmp_install/usr/bin/sltext
-
-          cp SLText.View/Assets/icon.png sltext-rpm/tmp_install/usr/share/icons/hicolor/256x256/apps/sltext.png
-          cp sltext.metainfo.xml sltext-rpm/tmp_install/usr/share/metainfo/sltext.metainfo.xml
-
-          cat <<EOT > sltext-rpm/tmp_install/usr/share/applications/sltext.desktop
+          cat <<EOT > sltext.desktop
           [Desktop Entry]
           Name=SLText
           Exec=/usr/bin/sltext %f
@@ -146,38 +123,42 @@ jobs:
           Terminal=false
           EOT
 
-          cat <<EOT > sltext-rpm/SPECS/sltext.spec
-          Name:           sltext
-          Version:        $VERSION
-          Release:        1%{?dist}
-          Summary:        SLText Moderno com SkiaSharp C#
-
-          License:        MIT
-          URL:            https://github.com/lucassantanna314/SLText
-          BuildArch:      x86_64
-
-          Requires:       glfw, mesa-libGL, mesa-libGLES, libX11, libXcursor, libXi, libXinerama, libXrandr, xclip, xsel, fontconfig
-
-          %description
-          SLText is a modern text editor built with SkiaSharp and C#.
-
-          %install
-          rm -rf \$RPM_BUILD_ROOT
-          cp -r sltext-rpm/tmp_install/* \$RPM_BUILD_ROOT/
-
-          %files
-          /usr/bin/sltext
-          /usr/share/applications/sltext.desktop
-          /usr/share/icons/hicolor/256x256/apps/sltext.png
-          /usr/share/metainfo/sltext.metainfo.xml
-
-          %changelog
-          * Sat Sep 12 2026 LucasSantanna <lucassantanna1995@gmail.com> - 0.1-1
-          - Initial package
-          EOT
-
-          rpmbuild --define "_topdir $(pwd)/sltext-rpm" -bb sltext-rpm/SPECS/sltext.spec
-          cp sltext-rpm/RPMS/x86_64/sltext-*.rpm "SLText_${VERSION}_Linux_x64.rpm"
+      - name: Create .RPM Package
+        run: |
+          VERSION="0.${{ github.run_number }}"
+          
+          fpm \
+            --input-type dir \
+            --output-type rpm \
+            --name sltext \
+            --version $VERSION \
+            --architecture x86_64 \
+            --license MIT \
+            --url "https://github.com/lucassantanna314/SLText" \
+            --description "SLText Moderno com SkiaSharp C#" \
+            --depends glfw \
+            --depends mesa-libGL \
+            --depends mesa-libGLES \
+            --depends libX11 \
+            --depends libXcursor \
+            --depends libXi \
+            --depends libXinerama \
+            --depends libXrandr \
+            --depends xclip \
+            --depends xsel \
+            --depends fontconfig \
+            --before-install /dev/null \
+            --after-install /dev/null \
+            --rpm-posttrans /dev/null \
+            --rpm-digest sha256 \
+            --rpm-file-attributes +exempted \
+            --epochs 0 \
+            --category "Application/TextEditor" \
+            ./publish/linux/=usr/bin/ \
+            sltext.desktop=/usr/share/applications/sltext.desktop \
+            SLText.View/Assets/icon.png=/usr/share/icons/hicolor/256x256/apps/sltext.png \
+            sltext.metainfo.xml=/usr/share/metainfo/sltext.metainfo.xml \
+            -o "SLText_${VERSION}_Linux_x64.rpm"
 
       - name: Upload Linux RPM Artifact
         uses: actions/upload-artifact@v4
