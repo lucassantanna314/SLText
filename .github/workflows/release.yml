@@ -89,7 +89,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          dnf install -y libicu rpm-build
+          dnf install -y libicu rpm-build ruby ruby-devel rubygems
+          gem install fpm --no-doc
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -145,55 +146,29 @@ jobs:
           cp SLText.View/Assets/icon.png sltext-rpm/usr/share/icons/hicolor/256x256/apps/sltext.png
           cp sltext.metainfo.xml sltext-rpm/usr/share/metainfo/sltext.metainfo.xml
 
-          export TOPDIR="$HOME/rpmbuild"
-          mkdir -p "$TOPDIR"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
-
-          cat > "$TOPDIR/SPECS/sltext.spec" <<EOF
-          Name: sltext
-          Version: $VERSION
-          Release: 1
-          Summary: SLText Moderno com SkiaSharp C#
-          License: MIT
-          URL: https://github.com/lucassantanna314/SLText
-          Requires: glfw
-          Requires: mesa-libGL
-          Requires: mesa-libGLES
-          Requires: libX11
-          Requires: libXcursor
-          Requires: libXi
-          Requires: libXinerama
-          Requires: libXrandr
-          Requires: xclip
-          Requires: xsel
-          Requires: fontconfig
-
-          %description
-          SLText Moderno com SkiaSharp C#
-
-          %install
-          mkdir -p %{buildroot}
-          cp -r $GITHUB_WORKSPACE/sltext-rpm/usr %{buildroot}/
-
-          %files
-          /usr/bin/sltext
-          /usr/bin/SLText.Core.pdb
-          /usr/bin/SLText.pdb
-          /usr/share/applications/sltext.desktop
-          /usr/share/icons/hicolor/256x256/apps/sltext.png
-          /usr/share/metainfo/sltext.metainfo.xml
-
-          %post
-          gtk-update-icon-cache -qf %{_icondir}/hicolor || true
-          update-desktop-database -q %{_datadir}/applications || true
-
-          %postun
-          gtk-update-icon-cache -qf %{_icondir}/hicolor || true
-          update-desktop-database -q %{_datadir}/applications || true
-          EOF
-
-          rpmbuild -bb --define "_topdir $TOPDIR" --define "_enable_debug_packages 0" "$TOPDIR/SPECS/sltext.spec"
-
-          mv "$TOPDIR/RPMS/x86_64/sltext-${VERSION}-1"*.rpm "SLText_${VERSION}_Linux_x64.rpm"
+          fpm \
+            --input-type dir \
+            --output-type rpm \
+            --name sltext \
+            --version $VERSION \
+            --architecture x86_64 \
+            --license MIT \
+            --url "https://github.com/lucassantanna314/SLText" \
+            --description "SLText Moderno com SkiaSharp C#" \
+            --depends glfw \
+            --depends mesa-libGL \
+            --depends mesa-libGLES \
+            --depends libX11 \
+            --depends libXcursor \
+            --depends libXi \
+            --depends libXinerama \
+            --depends libXrandr \
+            --depends xclip \
+            --depends xsel \
+            --depends fontconfig \
+            --rpm-digest sha256 \
+            --package "SLText_${VERSION}_Linux_x64.rpm" \
+            sltext-rpm
 
       - name: Upload Linux RPM Artifact
         uses: actions/upload-artifact@v4
