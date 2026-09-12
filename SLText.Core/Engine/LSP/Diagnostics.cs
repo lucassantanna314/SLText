@@ -40,11 +40,8 @@ public partial class LspService
                 _razorFiles[filePath] = razor;
                 analysisCode = razor.GeneratedCode;
 
-                var componentNames = await GetBlazorComponentNamesAsync().ConfigureAwait(false);
                 foreach (var error in razor.RazorErrors)
                 {
-                    if (IsSuppressableRazorDiagnostic(error, componentNames)) continue;
-
                     results.Add(new MappedDiagnostic
                     {
                         Message = error.GetMessage(),
@@ -112,29 +109,6 @@ public partial class LspService
         {
             _gate.Release();
         }
-    }
-
-    /// <summary>
-    /// RZ10012 ("unexpected markup element") is raised whenever Razor's tag-helper discovery does not
-    /// know the component. The in-process Razor engine does not discover tag helpers from referenced
-    /// assemblies, so without this filter every MudBlazor component in every file is flagged as an
-    /// error even though <c>dotnet build</c> accepts it. If the name resolves to a real component type
-    /// in the compilation, the diagnostic is wrong and is dropped.
-    /// </summary>
-    private static bool IsSuppressableRazorDiagnostic(
-        Microsoft.AspNetCore.Razor.Language.RazorDiagnostic diagnostic,
-        IReadOnlySet<string> componentNames)
-    {
-        if (!string.Equals(diagnostic.Id, "RZ10012", StringComparison.Ordinal)) return false;
-        if (componentNames.Count == 0) return false;
-
-        var message = diagnostic.GetMessage();
-        foreach (var name in componentNames)
-        {
-            if (message.Contains("'" + name + "'", StringComparison.Ordinal)) return true;
-        }
-
-        return false;
     }
 
     public async Task<SignatureHelpResult?> GetSignatureHelpAsync(string code, int cursorPosition, string filePath)

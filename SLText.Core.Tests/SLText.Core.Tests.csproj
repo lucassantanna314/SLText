@@ -17,4 +17,13 @@
     <ProjectReference Include="..\SLText.Core\SLText.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!--
+      ReferenceResolver takes the analysed project's framework assemblies from the running process's
+      trusted platform assemblies, so the Razor fixtures only see the components a real Blazor
+      project sees when the test host itself carries Microsoft.AspNetCore.Components and friends.
+    -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
 </Project>

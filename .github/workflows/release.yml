@@ -81,6 +81,109 @@ jobs:
           name: linux-deb
           path: "*.deb"
 
+  build-rpm:
+    runs-on: fedora-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0
+
+      - name: Install rpm-build
+        run: sudo dnf install -y rpm-build
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Publish Linux
+        run: >
+          dotnet publish SLText.View/SLText.View.csproj
+          -c Release
+          -r linux-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:IncludeAllContentForSelfExtract=true
+          -p:EnableCompressionInSingleFile=false
+          -o ./publish/linux
+
+      - name: Create .RPM Package
+        run: |
+          VERSION="0.${{ github.run_number }}"
+          mkdir -p sltext-rpm/BUILD
+          mkdir -p sltext-rpm/SOURCES
+          mkdir -p sltext-rpm/SPECS
+          mkdir -p sltext-rpm/tmp_install
+
+          cp -r ./publish/linux/* sltext-rpm/tmp_install/
+
+          if [ -f "sltext-rpm/tmp_install/SLText" ]; then
+              mv sltext-rpm/tmp_install/SLText sltext-rpm/tmp_install/sltext
+          fi
+
+          chmod +x sltext-rpm/tmp_install/sltext
+
+          mkdir -p sltext-rpm/tmp_install/usr/bin
+          mkdir -p sltext-rpm/tmp_install/usr/share/applications
+          mkdir -p sltext-rpm/tmp_install/usr/share/icons/hicolor/256x256/apps
+          mkdir -p sltext-rpm/tmp_install/usr/share/metainfo
+
+          mv sltext-rpm/tmp_install/sltext sltext-rpm/tmp_install/usr/bin/
+          cp SLText.View/Assets/icon.png sltext-rpm/tmp_install/usr/share/icons/hicolor/256x256/apps/sltext.png
+          cp sltext.metainfo.xml sltext-rpm/tmp_install/usr/share/metainfo/sltext.metainfo.xml
+
+          cat <<EOT > sltext-rpm/tmp_install/usr/share/applications/sltext.desktop
+          [Desktop Entry]
+          Name=SLText
+          Exec=/usr/bin/sltext %f
+          Icon=sltext
+          Type=Application
+          Categories=Development;TextEditor;
+          MimeType=text/plain;
+          Terminal=false
+          EOT
+
+          cat <<EOT > sltext-rpm/SPECS/sltext.spec
+          Name:           sltext
+          Version:        $VERSION
+          Release:        1%{?dist}
+          Summary:        SLText Moderno com SkiaSharp C#
+
+          License:        MIT
+          URL:            https://github.com/lucassantanna314/SLText
+          BuildArch:      x86_64
+
+          Requires:       glfw, mesa-libGL, mesa-libGLES, libX11, libXcursor, libXi, libXinerama, libXrandr, xclip, xsel, fontconfig
+
+          %description
+          SLText is a modern text editor built with SkiaSharp and C#.
+
+          %install
+          rm -rf \$RPM_BUILD_ROOT
+          cp -r sltext-rpm/tmp_install/* \$RPM_BUILD_ROOT/
+
+          %files
+          /usr/bin/sltext
+          /usr/share/applications/sltext.desktop
+          /usr/share/icons/hicolor/256x256/apps/sltext.png
+          /usr/share/metainfo/sltext.metainfo.xml
+
+          %changelog
+          * Sat Sep 12 2026 LucasSantanna <lucassantanna1995@gmail.com> - 0.1-1
+          - Initial package
+          EOT
+
+          rpmbuild --define "_topdir $(pwd)/sltext-rpm" -bb sltext-rpm/SPECS/sltext.spec
+          cp sltext-rpm/RPMS/x86_64/sltext-*.rpm "SLText_${VERSION}_Linux_x64.rpm"
+
+      - name: Upload Linux RPM Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-rpm
+          path: "*.rpm"
+
   build-windows:
     runs-on: windows-latest
     steps:
@@ -109,7 +212,7 @@ jobs:
           path: ./Installer/Output/*.exe
 
   release:
-    needs: [build-linux, build-windows]
+    needs: [build-linux, build-windows, build-rpm]
     runs-on: ubuntu-latest
     permissions: write-all
     steps:
@@ -122,4 +225,5 @@ jobs:
           generate_release_notes: true
           files: |
             linux-deb/*.deb
+            linux-rpm/*.rpm
             windows-exe/*.exe

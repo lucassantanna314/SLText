@@ -23,7 +23,8 @@ public partial class LspService
         _references = references;
         _projectAssemblyNames = projectAssemblyNames;
         _referencesVersion++;
-        _razorEngine = null;
+        _razorEngines.Clear();
+        _projectDirByDirectory.Clear();
     }
 
     /// <summary>Namespaces that always exist in any .NET compilation.</summary>
