@@ -50,7 +50,7 @@ public partial class WindowManager
         _editor.RequestScrollToCursor();
     }
     
-    public void SetCurrentFile(string path, bool resetCursor = false)
+    public void SetCurrentFile(string? path, bool resetCursor = false)
     {
         if (string.IsNullOrEmpty(path)) return;
 
@@ -82,14 +82,14 @@ public partial class WindowManager
                 if (_tabManager.Tabs.Count == 1 && string.IsNullOrEmpty(_tabManager.Tabs[0].FilePath))
                 {
                     var tab = _tabManager.Tabs[0];
-                    tab.Buffer.LoadText(File.ReadAllText(path).Replace("\t", "    "));
+                    tab.Buffer.LoadText(File.ReadAllText(path));
                     tab.FilePath = path;
                     tab.IsDirty = false;
                 }
                 else
                 {
                     var newBuffer = new TextBuffer();
-                    newBuffer.LoadText(File.ReadAllText(path).Replace("\t", "    "));
+                    newBuffer.LoadText(File.ReadAllText(path));
                     _tabManager.AddTab(newBuffer, new CursorManager(newBuffer), path);
                 }
             }

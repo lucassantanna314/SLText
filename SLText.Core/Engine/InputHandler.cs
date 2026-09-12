@@ -264,6 +264,10 @@ public class InputHandler
                 case "DownArrow":  _cursor.MoveDown(); break;
                 case "LeftArrow":  _cursor.MoveLeft(); break;
                 case "RightArrow": _cursor.MoveRight(); break;
+                case "Home":       _cursor.MoveToLineStart(); break;
+                case "End":        _cursor.MoveToLineEnd(); break;
+                case "PageUp":     _cursor.MovePageUp(PageSize); break;
+                case "PageDown":   _cursor.MovePageDown(PageSize); break;
             }
         }
     }
@@ -286,6 +290,9 @@ public class InputHandler
         DeleteSelectedText();
     }
     
+    /// <summary>Lines moved by PageUp/PageDown; the view keeps this in sync with the viewport.</summary>
+    public int PageSize { get; set; } = 20;
+
     public void ResetTypingState() => FinalizeTypingState();
     
     private bool IsMovementKey(string key) => 
@@ -321,10 +328,11 @@ public class InputHandler
         try { ClipboardService.SetText(fullText); } catch { }
     }
     
-    public void UpdateCurrentPath(string path)
+    public void UpdateCurrentPath(string? path)
     {
         _currentFilePath = path;
-        _saveCommand.SetPath(path);
+        // An untitled buffer has no path; leave the save command pointing at its previous target.
+        if (path != null) _saveCommand.SetPath(path);
     }
     
     public string GetLastDirectory()

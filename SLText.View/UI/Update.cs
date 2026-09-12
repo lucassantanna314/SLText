@@ -8,6 +8,9 @@ public partial class WindowManager
     {
         _editor.Update(dt);
         if (_terminal.IsVisible) _terminal.Update(dt);
+
+        // Bounds change on resize and on terminal/explorer toggles, so refresh the page size here.
+        _inputHandler.PageSize = _editor.VisibleLineCount;
         
         if (_lastPressedKey.HasValue && _activeKeyboard != null)
         {
@@ -54,14 +57,13 @@ public partial class WindowManager
             targetCursor = StandardCursor.Default;
         }
 
+        // Only touch the native cursor when it actually changes; setting it every frame is a
+        // pointless GLFW round-trip at 60Hz.
         if (targetCursor != _lastAppliedCursor)
         {
             _primaryMouse.Cursor.StandardCursor = targetCursor;
             _lastAppliedCursor = targetCursor;
         }
-
-        _primaryMouse.Cursor.StandardCursor = targetCursor;
-        _lastAppliedCursor = targetCursor;
 
         if (_pendingAction != null)
         {

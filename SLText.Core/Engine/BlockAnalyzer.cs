@@ -6,6 +6,13 @@ public record CodeBlock(int StartLine, int EndLine, int IndentLevel);
 
 public class BlockAnalyzer
 {
+    /// <summary>
+    /// Cached because <see cref="RegexOptions.Compiled"/> emits a dynamic assembly that can never be
+    /// unloaded, and <c>AnalyzeBlocks</c> runs once per rendered frame. Constructing it inside the
+    /// method leaked roughly one assembly per frame (~60/s) for every open HTML or XML file.
+    /// </summary>
+    private static readonly Regex TagRegex = new(@"<(/?)([a-zA-Z0-9]+)[^>]*>", RegexOptions.Compiled);
+
     public List<CodeBlock> AnalyzeBlocks(TextBuffer buffer, string extension)
     {
         var blocks = new List<CodeBlock>();
@@ -55,12 +62,10 @@ public class BlockAnalyzer
         
         var stack = new Stack<(int line, int indent, string tagName)>();
 
-        var tagRegex = new Regex(@"<(/?)([a-zA-Z0-9]+)[^>]*>", RegexOptions.Compiled);
-
         for (int i = 0; i < lines.Count; i++)
         {
             string text = lines[i];
-            var matches = tagRegex.Matches(text);
+            var matches = TagRegex.Matches(text);
 
             foreach (Match match in matches)
             {

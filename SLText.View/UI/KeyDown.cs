@@ -196,12 +196,11 @@ public partial class WindowManager
             return;
         }
 
-        string? mappedKey = KeyboardMapper.Normalize(key);
-        if (mappedKey == null) return;
+        string mappedKey = KeyboardMapper.Normalize(key);
 
         if (_modal.IsVisible)
         {
-            if (_modal.HandleKeyDown(mappedKey)) return;
+            if (_modal.HandleKeyDown(mappedKey, ctrl, shift)) return;
         }
 
         if (ctrl && key == Key.C) { _inputHandler.HandleCopy(); return; }

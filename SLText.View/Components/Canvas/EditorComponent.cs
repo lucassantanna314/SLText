@@ -14,7 +14,6 @@ namespace SLText.View.Components;
 public class EditorComponent : IComponent, IZoomable
 {
     private List<SearchResult> _searchResults = new();
-    private string _lastSearchTerm = "";
 
     public SKRect Bounds { get; set; }
     private TextBuffer _buffer;
@@ -50,12 +49,48 @@ public class EditorComponent : IComponent, IZoomable
     private static readonly Regex TestAttributeRegex = new Regex(@"\[(Test|Fact|TestMethod|TestClass)\]", RegexOptions.Compiled);
     
     private List<LspService.MappedDiagnostic> _diagnostics = new();
-    
+
+    /// <summary>Diagnostics indexed by 1-based line, rebuilt only when the set changes.</summary>
+    private Dictionary<int, List<LspService.MappedDiagnostic>> _diagnosticsByLine = new();
+
+    /// <summary>
+    /// Cached because this ran once per visible line per frame: at 60Hz with 50 visible lines that
+    /// is 3000 SKPaint + SKPathEffect allocations per second.
+    /// </summary>
+    private readonly SKPaint _squigglePaint = new()
+    {
+        Color = SKColors.Red,
+        Style = SKPaintStyle.Stroke,
+        StrokeWidth = 2.0f,
+        IsAntialias = true,
+        PathEffect = SKPathEffect.CreateDash(new float[] { 2, 2 }, 0),
+    };
+
     public void SetDiagnostics(List<LspService.MappedDiagnostic> diagnostics)
     {
         _diagnostics = diagnostics;
+        _diagnosticsByLine = diagnostics
+            .GroupBy(d => d.Line)
+            .ToDictionary(g => g.Key, g => g.ToList());
         _gutterRenderer.SetDiagnostics(diagnostics);
     }
+
+    /// <summary>
+    /// X offset of a <em>buffer</em> column within a line, accounting for tab expansion. Every
+    /// measurement in the render path goes through this: measuring the raw line would use whatever
+    /// width Skia gives a literal tab, which does not match the cells actually drawn.
+    /// </summary>
+    private float MeasureToColumn(string rawLine, int bufferColumn)
+    {
+        string expanded = TabExpansion.Expand(rawLine);
+        int display = Math.Clamp(TabExpansion.ToDisplayColumn(rawLine, bufferColumn), 0, expanded.Length);
+        return _font.MeasureText(expanded.AsSpan(0, display));
+    }
+
+    private float MeasureFullWidth(string rawLine) => _font.MeasureText(TabExpansion.Expand(rawLine));
+
+    internal IReadOnlyList<LspService.MappedDiagnostic> GetDiagnosticsForLine(int oneBasedLine) =>
+        _diagnosticsByLine.TryGetValue(oneBasedLine, out var list) ? list : Array.Empty<LspService.MappedDiagnostic>();
     
     public EditorComponent(TextBuffer buffer, CursorManager cursor)
     {
@@ -81,32 +116,22 @@ public class EditorComponent : IComponent, IZoomable
     
     private void RenderDiagnostics(SKCanvas canvas, int lineIndex, float textX, float yPos)
     {
-        if (_diagnostics == null || _diagnostics.Count == 0) return;
+        var lineErrors = GetDiagnosticsForLine(lineIndex + 1);
+        if (lineErrors.Count == 0) return;
 
-        var lineErrors = _diagnostics.Where(d => d.Line == lineIndex + 1);
-        
-        using var paint = new SKPaint
-        {
-            Color = SKColors.Red,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 2.0f, 
-            IsAntialias = true,
-            PathEffect = SKPathEffect.CreateDash(new float[] { 2, 2 }, 0) 
-        };
+        string lineText = _buffer.GetLine(lineIndex);
 
         foreach (var diag in lineErrors)
         {
-            string lineText = _buffer.GetLine(lineIndex);
-
             int startChar = Math.Clamp(diag.CharacterStart, 0, lineText.Length);
-            int endChar = Math.Clamp(diag.CharacterEnd, 0, lineText.Length);
-    
-            float startX = _font.MeasureText(lineText.Substring(0, startChar));
-            float endX = _font.MeasureText(lineText.Substring(0, endChar));
+            int endChar = Math.Clamp(diag.CharacterEnd, startChar, lineText.Length);
 
-            if (endX - startX < 4) endX = startX + 8; 
+            float startX = MeasureToColumn(lineText, startChar);
+            float endX = MeasureToColumn(lineText, endChar);
 
-            canvas.DrawLine(textX + startX, yPos + 3, textX + endX, yPos + 3, paint);
+            if (endX - startX < 4) endX = startX + 8;
+
+            canvas.DrawLine(textX + startX, yPos + 3, textX + endX, yPos + 3, _squigglePaint);
         }
     }
 
@@ -158,8 +183,8 @@ public class EditorComponent : IComponent, IZoomable
                 var lineResults = _searchResults.Where(r => r.Line == i);
                 foreach (var res in lineResults)
                 {
-                    float startX = _font.MeasureText(lines[i].Substring(0, res.Column));
-                    float width = _font.MeasureText(lines[i].Substring(res.Column, res.Length));
+                    float startX = MeasureToColumn(lines[i], res.Column);
+                    float width = MeasureToColumn(lines[i], res.Column + res.Length) - startX;
 
                     using var searchPaint = new SKPaint { Color = SKColors.BlueViolet.WithAlpha(40) };
                     var searchRect = new SKRect(
@@ -171,14 +196,15 @@ public class EditorComponent : IComponent, IZoomable
                     canvas.DrawRect(searchRect, searchPaint);
                 }
 
-                string lineToRender = lines[i];
+                // Expand for display only - the buffer keeps the file's real bytes.
+                string lineToRender = TabExpansion.Expand(lines[i]);
                 _textRenderer.RenderLine(canvas, lineToRender, textX, yPos, _currentRules);
 
                 RenderDiagnostics(canvas, i, textX, yPos);
 
                 if (i == _cursor.Line && _showCursor)
                 {
-                    RenderCursor(canvas, textX, yPos, lineToRender, metrics);
+                    RenderCursor(canvas, textX, yPos, lines[i], metrics);
                 }
             }
 
@@ -232,9 +258,19 @@ public class EditorComponent : IComponent, IZoomable
     public void SetCurrentData(TextBuffer buffer, CursorManager cursor)
     {
         if (buffer == null || cursor == null) return;
-        
+
+        bool bufferChanged = !ReferenceEquals(_buffer, buffer) || !ReferenceEquals(_cursor, cursor);
+
         _buffer = buffer;
         _cursor = cursor;
+
+        if (bufferChanged)
+        {
+            // Search hits are (line, column) offsets into one specific buffer. Carrying them across a
+            // tab switch painted highlights over unrelated text and could index past the end of a
+            // shorter line.
+            _searchResults = new List<SearchResult>();
+        }
 
         _viewport.UpdateBounds(Bounds); 
 
@@ -248,7 +284,6 @@ public class EditorComponent : IComponent, IZoomable
 
     public void PerformSearch(string term)
     {
-        _lastSearchTerm = term;
         _searchResults = _buffer.SearchAll(term);
 
         if (_searchResults.Any())
@@ -297,10 +332,14 @@ public class EditorComponent : IComponent, IZoomable
             
             if (error != null)
             {
-                int length = error.CharacterEnd - error.CharacterStart;
+                // Diagnostics can be a pass behind the buffer (they are computed asynchronously), so
+                // the recorded span may no longer fit in the current line.
+                int start = Math.Clamp(error.CharacterStart, 0, lineContent.Length);
+                int length = Math.Clamp(error.CharacterEnd - start, 0, lineContent.Length - start);
+
                 if (length > 0)
                 {
-                    string textWithError = lineContent.Substring(error.CharacterStart, length);
+                    string textWithError = lineContent.Substring(start, length);
                     OnQuickFixRequested?.Invoke(line, textWithError);
                 }
             }
@@ -318,8 +357,7 @@ public class EditorComponent : IComponent, IZoomable
 
     private void RenderCursor(SKCanvas canvas, float textX, float yPos, string lineText, SKFontMetrics metrics)
     {
-        int safeCol = Math.Min(_cursor.Column, lineText.Length);
-        float cursorX = _font.MeasureText(lineText.Substring(0, safeCol));
+        float cursorX = MeasureToColumn(lineText, _cursor.Column);
 
         using var paint = new SKPaint { Color = _theme.Cursor };
         var rect = new SKRect(textX + cursorX, yPos + metrics.Ascent, textX + 2 + cursorX, yPos + metrics.Descent);
@@ -339,7 +377,7 @@ public class EditorComponent : IComponent, IZoomable
         {
             float gutterWidth = _gutterRenderer.GetWidth(_buffer.LineCount);
             string currentLine = _buffer.GetLines().ElementAtOrDefault(_cursor.Line) ?? "";
-            float cursorX = _font.MeasureText(currentLine.Substring(0, Math.Min(_cursor.Column, currentLine.Length)));
+            float cursorX = MeasureToColumn(currentLine, _cursor.Column);
 
             _viewport.ScrollToCursor(_cursor.Line, _cursor.Column, cursorX, gutterWidth);
             _needScrollToCursor = false;
@@ -377,12 +415,16 @@ public class EditorComponent : IComponent, IZoomable
     
         float localY = y - Bounds.Top;
 
-        return _viewport.GetTextPosition(
-            localX, 
-            localY, 
-            0, 
+        var (line, displayCol) = _viewport.GetTextPosition(
+            localX,
+            localY,
+            0,
             _font.MeasureText(" ")
         );
+
+        // The viewport works purely in pixels, so it yields a display column. Callers index the
+        // buffer, where a tab is a single character.
+        return (line, TabExpansion.ToBufferColumn(_buffer.GetLine(line), displayCol));
     }
 
     public string UpdateSyntax(string? path)
@@ -399,7 +441,17 @@ public class EditorComponent : IComponent, IZoomable
         _textRenderer.SetTheme(theme);
         _bracketRenderer.SetTheme(theme);
         _indentGuideRenderer.SetTheme(theme);
+
+        // GetRulesForFile resolves colours eagerly, so the cached rules still hold the old palette.
+        // Without this the background flipped on Ctrl+T while keywords kept their dark-theme colours.
+        _currentRules = _syntaxProvider.GetRulesForFile(_currentFilePath, theme);
     }
+
+    /// <summary>Lines that fit in the current viewport; drives PageUp/PageDown.</summary>
+    public int VisibleLineCount =>
+        _lineHeight > 0 && Bounds.Height > 0
+            ? Math.Max(1, (int)(Bounds.Height / _lineHeight))
+            : 1;
 
     public void RequestScrollToCursor() => _needScrollToCursor = true;
 
@@ -421,23 +473,23 @@ public class EditorComponent : IComponent, IZoomable
 
             if (lineIndex == sLine && lineIndex == eLine)
             {
-                startX = _font.MeasureText(text.Substring(0, Math.Min(sCol, text.Length)));
-                endX = _font.MeasureText(text.Substring(0, Math.Min(eCol, text.Length)));
+                startX = MeasureToColumn(text, sCol);
+                endX = MeasureToColumn(text, eCol);
             }
             else if (lineIndex == sLine)
             {
-                startX = _font.MeasureText(text.Substring(0, Math.Min(sCol, text.Length)));
-                endX = _font.MeasureText(text) + 10;
+                startX = MeasureToColumn(text, sCol);
+                endX = MeasureFullWidth(text) + 10;
             }
             else if (lineIndex == eLine)
             {
                 startX = 0;
-                endX = _font.MeasureText(text.Substring(0, Math.Min(eCol, text.Length)));
+                endX = MeasureToColumn(text, eCol);
             }
             else
             {
                 startX = 0;
-                endX = _font.MeasureText(text) + 10;
+                endX = MeasureFullWidth(text) + 10;
             }
 
             using var selectionPaint = new SKPaint { Color = _theme.SelectionBackground };
@@ -545,8 +597,7 @@ public class EditorComponent : IComponent, IZoomable
         float gutterWidth = GetGutterWidth();
     
         string lineText = _buffer.GetLine(_cursor.Line);
-        int safeCol = Math.Min(_cursor.Column, lineText.Length);
-        float cursorX = _font.MeasureText(lineText.Substring(0, safeCol));
+        float cursorX = MeasureToColumn(lineText, _cursor.Column);
 
         float screenX = Bounds.Left + gutterWidth + 10 + cursorX - _viewport.ScrollX;
         float screenY = Bounds.Top + (_cursor.Line * _lineHeight) + _lineHeight - _viewport.ScrollY;

@@ -5,215 +5,195 @@ namespace SLText.Core.Engine.LSP;
 
 public partial class LspService
 {
+    /// <summary>
+    /// Loads a project folder: resolves references, then adds every source document to the
+    /// analysis workspace in a single batch.
+    /// </summary>
+    /// <remarks>
+    /// The previous implementation called <c>TryApplyChanges</c> once per file and re-fetched the
+    /// project each time, which is quadratic in the number of files - a 500-file project produced
+    /// 500 full solution clones.
+    /// </remarks>
     public void LoadProjectFiles(string rootPath, Action<string>? onProgress = null)
     {
-        onProgress?.Invoke($"Loading: {rootPath}");
-        _projectRoot = rootPath;
-        
-        var forbiddenDlls = GetForbiddenAssemblies(rootPath);
-        var projectRefs = new Dictionary<string, MetadataReference>(_referencesMap, StringComparer.OrdinalIgnoreCase);
-        var potentialDlls = Directory.GetFiles(rootPath, "*.dll", SearchOption.AllDirectories);
-        
-        foreach (var dllPath in potentialDlls)
+        ThrowIfDisposed();
+
+        if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
         {
-            if (dllPath.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
-            var fileName = Path.GetFileName(dllPath);
-            if (forbiddenDlls.Contains(fileName) || fileName.EndsWith(".Views.dll", StringComparison.OrdinalIgnoreCase)) continue;
-            
-            if (fileName.Equals("MudBlazor.dll", StringComparison.OrdinalIgnoreCase))
-            {
-                onProgress?.Invoke($"[FOUND] MudBlazor.dll at: {dllPath}");
-            }
-            
-            if (!projectRefs.ContainsKey(fileName))
-            {
-                try 
-                { 
-                    projectRefs[fileName] = MetadataReference.CreateFromFile(dllPath);
-                    onProgress?.Invoke($"[LOADED] {fileName}");
-                } 
-                catch (Exception ex) 
-                { 
-                    onProgress?.Invoke($"[ERROR] Failed to load {fileName}: {ex.Message}");
-                }
-            }
+            onProgress?.Invoke($"[WARN] Not a directory: {rootPath}");
+            return;
         }
 
-        InitProject(projectRefs.Values, rootPath);
-
-        var files = Directory.GetFiles(rootPath, "*.cs", SearchOption.AllDirectories);
-        onProgress?.Invoke($"Found {files.Length} files .cs. Scanning...");
-
-        int loadedCount = 0;
-        
-        foreach (var file in files)
-        {
-            if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
-            
-            bool isObj = file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}");
-            
-            if (isObj)
-            {
-                if (!file.EndsWith(".g.cs")) continue;
-                if (file.EndsWith(".AssemblyAttributes.cs") || file.EndsWith(".AssemblyInfo.cs")) continue;
-            }
-            else
-            {
-                if (file.EndsWith(".AssemblyAttributes.cs")) continue;
-                if (file.EndsWith(".g.cs") && !file.EndsWith(".razor.g.cs")) continue;
-            }
-
-            try 
-            {
-                var code = File.ReadAllText(file).Replace("\r\n", "\n"); 
-                var fileName = Path.GetFileName(file);
-
-                if (!_project.Documents.Any(d => d.FilePath == file))
-                {
-                    var docInfo = DocumentInfo.Create(
-                        DocumentId.CreateNewId(_project.Id),
-                        fileName,
-                        filePath: file, 
-                        loader: TextLoader.From(TextAndVersion.Create(SourceText.From(code), VersionStamp.Create()))
-                    );
-
-                    var solution = _workspace.CurrentSolution.AddDocument(docInfo);
-                    _workspace.TryApplyChanges(solution);
-                    _project = _workspace.CurrentSolution.GetProject(_project.Id)!;
-                    loadedCount++;
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error loading {file}: {ex.Message}");
-            }
-        }
-        
-        onProgress?.Invoke($"LSP Ready! {loadedCount} files loaded.");
-    }
-    
-    private HashSet<string> GetForbiddenAssemblies(string rootPath)
-    {
-        var forbidden = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-    
+        _gate.Wait();
         try
         {
-            var projectFiles = Directory.GetFiles(rootPath, "*.csproj", SearchOption.AllDirectories);
-        
-            foreach (var projPath in projectFiles)
+            onProgress?.Invoke($"Loading project: {rootPath}");
+            _projectRoot = rootPath;
+
+            var resolved = ReferenceResolver.Resolve(rootPath, onProgress);
+            ApplyReferences(resolved.References, resolved.ProjectAssemblyNames);
+            foreach (var note in resolved.Notes) onProgress?.Invoke($"[WARN] {note}");
+
+            InitProject(resolved.References, rootPath);
+            var projectId = _project!.Id;
+
+            var files = CollectSourceFiles(rootPath, onProgress);
+            var solution = _workspace.CurrentSolution;
+            int added = 0;
+
+            foreach (var file in files)
             {
-                try 
+                try
                 {
-                    var content = File.ReadAllText(projPath);
-                    var match = System.Text.RegularExpressions.Regex.Match(content, @"<AssemblyName>(.*?)</AssemblyName>");
-                
-                    if (match.Success)
-                    {
-                        forbidden.Add(match.Groups[1].Value.Trim() + ".dll");
-                    }
-                    else
-                    {
-                        forbidden.Add(Path.GetFileNameWithoutExtension(projPath) + ".dll");
-                    }
+                    var text = File.ReadAllText(file).Replace("\r\n", "\n");
+                    var docInfo = DocumentInfo.Create(
+                        DocumentId.CreateNewId(_project!.Id),
+                        Path.GetFileName(file),
+                        filePath: file,
+                        loader: TextLoader.From(TextAndVersion.Create(SourceText.From(text), VersionStamp.Create())));
+
+                    solution = solution.AddDocument(docInfo);
+                    added++;
                 }
-                catch {}
+                catch (Exception ex)
+                {
+                    onProgress?.Invoke($"[WARN] Skipped {file}: {ex.Message}");
+                }
             }
-        }
-        catch { }
-    
-        return forbidden;
-    }
-    
-    private void FindTypeInNamespaceRecursively(INamespaceSymbol currentNamespace, string targetTypeName, HashSet<string> results)
-    {
-        var types = currentNamespace.GetTypeMembers(targetTypeName);
-    
-        if (types.Any(t => t.DeclaredAccessibility == Accessibility.Public))
-        {
-            var nsDisplay = currentNamespace.ToDisplayString();
-            if (!string.IsNullOrEmpty(nsDisplay) && nsDisplay != "<global namespace>")
+
+            if (!_workspace.TryApplyChanges(solution))
             {
-                results.Add(nsDisplay);
+                onProgress?.Invoke("[ERROR] Could not apply documents to the workspace.");
+                return;
             }
+
+            _project = _workspace.CurrentSolution.GetProject(projectId)!;
+            _razorFiles.Clear();
+
+            bool implicitUsings = HasImplicitUsingsEnabled(rootPath);
+            AddImplicitUsingsDocumentAsync(implicitUsings).GetAwaiter().GetResult();
+
+            onProgress?.Invoke($"Ready: {added} source file(s) indexed.");
+        }
+        catch (Exception ex)
+        {
+            onProgress?.Invoke($"[ERROR] Project load failed: {ex.Message}");
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private static List<string> CollectSourceFiles(string rootPath, Action<string>? onProgress)
+    {
+        var files = new List<string>();
+
+        foreach (var file in Directory.EnumerateFiles(rootPath, "*.cs", SearchOption.AllDirectories))
+        {
+            bool inBin = file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal);
+            if (inBin) continue;
+
+            bool inObj = file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal);
+            string name = Path.GetFileName(file);
+
+            if (inObj)
+            {
+                // Generated Razor code-behind is useful; other obj artefacts are not real sources.
+                if (!name.EndsWith(".razor.g.cs", StringComparison.Ordinal)) continue;
+            }
+
+            if (name.EndsWith(".AssemblyAttributes.cs", StringComparison.Ordinal) ||
+                name.EndsWith(".AssemblyInfo.cs", StringComparison.Ordinal) ||
+                name.EndsWith(".GlobalUsings.g.cs", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            files.Add(file);
         }
 
-        foreach (var childNs in currentNamespace.GetNamespaceMembers())
-        {
-            FindTypeInNamespaceRecursively(childNs, targetTypeName, results);
-        }
+        onProgress?.Invoke($"Found {files.Count} C# source file(s).");
+        return files;
     }
-    
+
+    /// <summary>
+    /// Finds the namespaces that declare <paramref name="typeName"/>, used by the "add using" quick fix.
+    /// </summary>
+    /// <remarks>
+    /// The previous implementation also walked the entire global namespace tree of every referenced
+    /// assembly recursively. With ~180 references that visits hundreds of thousands of symbols and
+    /// can take seconds; <see cref="Compilation.GetSymbolsWithName"/> already covers it.
+    /// </remarks>
     public async Task<List<string>> GetTypeNamespacesAsync(string typeName)
     {
-        if (_project == null) return new List<string>();
+        ThrowIfDisposed();
+        if (string.IsNullOrWhiteSpace(typeName)) return new List<string>();
 
-        var compilation = await _project.GetCompilationAsync();
-        if (compilation == null) return new List<string>();
-        
-        var results = new HashSet<string>();
-
-        var symbols = compilation.GetSymbolsWithName(typeName, SymbolFilter.Type)
-            .Where(s => s.DeclaredAccessibility == Accessibility.Public);
-
-        foreach (var symbol in symbols)
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
         {
-            var ns = symbol.ContainingNamespace.ToDisplayString();
-            if (!string.IsNullOrEmpty(ns) && ns != "<global namespace>")
-                results.Add(ns);
-        }
-        
-        var globalNs = compilation.GlobalNamespace;
-        
-        FindTypeInNamespaceRecursively(globalNs, typeName, results);
+            if (_project == null) return new List<string>();
 
-        return results.ToList();
+            var compilation = await _project.GetCompilationAsync().ConfigureAwait(false);
+            if (compilation == null) return new List<string>();
+
+            return compilation.GetSymbolsWithName(typeName, SymbolFilter.Type)
+                .Where(s => s.DeclaredAccessibility == Accessibility.Public)
+                .Select(s => s.ContainingNamespace?.ToDisplayString() ?? string.Empty)
+                .Where(ns => ns.Length > 0 && ns != "<global namespace>")
+                .Distinct()
+                .OrderBy(ns => ns, StringComparer.Ordinal)
+                .ToList();
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
-    
+
+    /// <summary>
+    /// Ensures the workspace document for <paramref name="filePath"/> holds <paramref name="code"/>
+    /// and returns it. Must be called while holding <see cref="_gate"/>.
+    /// </summary>
     private Document UpdateDocument(string code, string filePath)
     {
         if (_project == null)
         {
-            InitProject(_referencesMap.Values, Path.GetDirectoryName(filePath) ?? "");
+            InitProject(_references, string.Empty);
         }
-        
-        if (filePath.EndsWith(".razor"))
-        {
-            var (generatedCode, razorDoc, razorErrors) = CompileRazorToCSharp(code, filePath);
-            code = generatedCode;
-            _lastRazorDoc = razorDoc;
-            filePath += ".g.cs"; 
-        }
-        
-        var normalizedCode = code.Replace("\r\n", "\n");
-        
-        string safePath = string.IsNullOrEmpty(filePath) ? "new_file.cs" : filePath;
-        string fileName = Path.GetFileName(safePath);
+
+        var normalized = code.Replace("\r\n", "\n");
+        string safePath = string.IsNullOrEmpty(filePath) ? "/__sltext__/untitled.cs" : filePath;
 
         var document = _workspace.CurrentSolution.Projects
             .SelectMany(p => p.Documents)
-            .FirstOrDefault(d => d.FilePath == safePath); 
+            .FirstOrDefault(d => string.Equals(d.FilePath, safePath, StringComparison.Ordinal));
 
         if (document == null)
         {
-            var docId = DocumentId.CreateNewId(_project.Id);
             var docInfo = DocumentInfo.Create(
-                docId,
-                fileName,
-                filePath: safePath, 
-                loader: TextLoader.From(TextAndVersion.Create(SourceText.From(normalizedCode), VersionStamp.Create()))
-            );
-            
+                DocumentId.CreateNewId(_project!.Id),
+                Path.GetFileName(safePath),
+                filePath: safePath,
+                loader: TextLoader.From(TextAndVersion.Create(SourceText.From(normalized), VersionStamp.Create())));
+
             var solution = _workspace.CurrentSolution.AddDocument(docInfo);
             _workspace.TryApplyChanges(solution);
         }
         else
         {
-            var solution = _workspace.CurrentSolution.WithDocumentText(document.Id, SourceText.From(normalizedCode));
-            _workspace.TryApplyChanges(solution);
+            // Skip the workspace round-trip entirely when nothing changed - this is the common case
+            // while the user is merely moving the caret.
+            var current = document.GetTextAsync().GetAwaiter().GetResult();
+            if (current.ToString() != normalized)
+            {
+                var solution = _workspace.CurrentSolution.WithDocumentText(document.Id, SourceText.From(normalized));
+                _workspace.TryApplyChanges(solution);
+            }
         }
 
-        _project = _workspace.CurrentSolution.GetProject(_project.Id)!;
-        return _project.Documents.First(d => d.FilePath == safePath);
+        _project = _workspace.CurrentSolution.GetProject(_project!.Id)!;
+        return _project.Documents.First(d => string.Equals(d.FilePath, safePath, StringComparison.Ordinal));
     }
-    
 }

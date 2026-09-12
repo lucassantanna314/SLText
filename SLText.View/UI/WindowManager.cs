@@ -33,8 +33,13 @@ public partial class WindowManager : IDisposable
     private string? _currentFilePath;
     private bool _isDirty;
     public bool IsDirty => _isDirty;
-    private bool _isMouseDown;
     private Action? _pendingAction;
+
+    /// <summary>Tab the renderer is currently pointed at; avoids re-binding every frame.</summary>
+    private TabInfo? _renderedTab;
+
+    /// <summary>Startup tracing only: logs the first successfully rendered frame.</summary>
+    private bool _firstFrameLogged;
 
     private Key? _lastPressedKey;
     private double _repeatTimer = 0;
@@ -75,7 +80,10 @@ public partial class WindowManager : IDisposable
         var options = WindowOptions.Default;
         options.Size = new Silk.NET.Maths.Vector2D<int>(800, 600);
         options.Title = "SLText";
+        StartupLog.Write("WindowManager ctor: creating GLFW window");
         _window = Window.Create(options);
+        StartupLog.Write("WindowManager ctor: window created",
+            $"API={_window.API} size={_window.Size.X}x{_window.Size.Y}");
         _window.Closing += OnWindowClosing;
 
 
@@ -111,17 +119,9 @@ public partial class WindowManager : IDisposable
 
         _inputHandler.OnTabCloseRequested += () => CloseActiveTab();
 
-        _inputHandler.OnNextTabRequested += () =>
-        {
-            _tabManager.NextTab();
-            SyncActiveTab(false);
-        };
+        _inputHandler.OnNextTabRequested += () => SwitchTab(+1);
 
-        _inputHandler.OnPreviousTabRequested += () =>
-        {
-            _tabManager.PreviousTab();
-            SyncActiveTab(false);
-        };
+        _inputHandler.OnPreviousTabRequested += () => SwitchTab(-1);
 
         _inputHandler.OnToggleExplorerRequested += () =>
         {
@@ -301,6 +301,32 @@ public partial class WindowManager : IDisposable
     }
     
 
+    /// <summary>
+    /// Shared by the keyboard and mouse tab-switch paths.
+    /// </summary>
+    /// <remarks>
+    /// The outgoing tab's scroll position used to be saved only on the mouse path, so any tab last
+    /// left via Ctrl+Tab restored at (0,0) instead of where the user had been reading.
+    /// </remarks>
+    private void SwitchTab(int direction)
+    {
+        SaveActiveTabScroll();
+
+        if (direction > 0) _tabManager.NextTab();
+        else _tabManager.PreviousTab();
+
+        SyncActiveTab(false);
+    }
+
+    private void SaveActiveTabScroll()
+    {
+        var active = _tabManager.ActiveTab;
+        if (active == null) return;
+
+        active.SavedScrollX = _editor.ScrollX;
+        active.SavedScrollY = _editor.ScrollY;
+    }
+
     private void HandleRunTest(int lineNumber)
     {
         string codeLine = _buffer.GetLine(lineNumber + 1);
@@ -427,27 +453,38 @@ public partial class WindowManager : IDisposable
 
     private void SetupSurface()
     {
-        if (_surface != null)
-        {
-            _surface.Dispose();
-            _surface = null;
-        }
+        _surface?.Dispose();
+        _surface = null!;
 
         if (_grContext == null) return;
 
         var width = Math.Max(1, _window.Size.X);
         var height = Math.Max(1, _window.Size.Y);
-        
-        var target = new GRBackendRenderTarget(width, height, 0, 8, new GRGlFramebufferInfo(0, 0x8058)); // 0x8058 = GL_RGBA8
-    
-        _surface = SKSurface.Create(_grContext, target, GRSurfaceOrigin.BottomLeft, SKColorType.Rgba8888);
+
+        // The render target wraps the default framebuffer and is unmanaged; not disposing it leaked
+        // a native allocation on every window resize.
+        using var target = new GRBackendRenderTarget(width, height, 0, 8, new GRGlFramebufferInfo(0, 0x8058)); // 0x8058 = GL_RGBA8
+
+        _surface = SKSurface.Create(_grContext, target, GRSurfaceOrigin.BottomLeft, SKColorType.Rgba8888)
+                   ?? throw new InvalidOperationException($"Could not create a {width}x{height} Skia surface.");
+
+        StartupLog.Write("SetupSurface: created", $"{width}x{height}");
     }
 
     public void Dispose()
     {
+        _diagnosticCts?.Cancel();
+        _diagnosticCts?.Dispose();
+        _diagnosticCts = null;
+
+        _lspService.Dispose();
+        _terminal.ShutdownAllTerminals();
+
         _surface?.Dispose();
         _grContext?.Dispose();
         _window?.Dispose();
+
+        GC.SuppressFinalize(this);
     }
 
     public void Run() => _window.Run();

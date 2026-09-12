@@ -44,7 +44,15 @@ public class TerminalComponent : IComponent
     
     private readonly List<TerminalInstance> _terminals = new();
     private int _activeTabIndex = 0;
-    private TerminalInstance ActiveTerminal => _terminals[_activeTabIndex];
+    private TerminalInstance ActiveTerminal
+    {
+        get
+        {
+            if (_terminals.Count == 0) return new TerminalInstance("Empty");
+            if (_activeTabIndex < 0 || _activeTabIndex >= _terminals.Count) _activeTabIndex = 0;
+            return _terminals[_activeTabIndex];
+        }
+    }
     
     private bool _cursorVisible = true;
     private double _cursorTimer = 0;
@@ -80,15 +88,16 @@ public class TerminalComponent : IComponent
             if (problemsTab == null)
             {
                 problemsTab = new TerminalInstance("Problems") { IsReadOnly = true };
-                _terminals.Insert(0, problemsTab); 
+                _terminals.Insert(0, problemsTab);
+                _activeTabIndex = 0;
             }
         }
 
         lock (problemsTab.OutputLines)
         {
             problemsTab.OutputLines.Clear();
-            problemsTab.OutputLines.Add(""); 
-            
+            problemsTab.OutputLines.Add("");
+
             problemsTab.OutputLines.Add($"File: {fileName}");
             problemsTab.OutputLines.Add("----------------------------------------");
 
@@ -109,7 +118,7 @@ public class TerminalComponent : IComponent
                 }
             }
             problemsTab.OutputLines.Add("");
-            problemsTab.LastDataReceived = DateTime.Now; 
+            problemsTab.LastDataReceived = DateTime.Now;
         }
     }
     
@@ -188,13 +197,12 @@ public class TerminalComponent : IComponent
     
         var terminal = new TerminalInstance(finalTitle);
         terminal.Service.OnDataReceived += (data) => ProcessTerminalData(terminal, data);
-        terminal.Service.Start(workingDirectory ?? _currentWorkingDirectory);
-        
+
         if (!terminal.IsReadOnly)
         {
             terminal.Service.Start(workingDirectory ?? _currentWorkingDirectory);
         }
-        
+
         lock(_terminals)
         {
             _terminals.Add(terminal);
@@ -206,17 +214,22 @@ public class TerminalComponent : IComponent
     private void ProcessTerminalData(TerminalInstance term, string data)
     {
         if (term.IsReadOnly) return;
-        
+
         term.LastDataReceived = DateTime.Now;
-        
+
         lock (term.OutputLines)
         {
-            if (OperatingSystem.IsWindows()) term.InitialCleanupDone = true;
-            
+            // Initialize with an empty line if this is the first data
+            if (term.OutputLines.Count == 0)
+            {
+                term.OutputLines.Add("");
+            }
+
             for (int i = 0; i < data.Length; i++)
             {
                 char c = data[i];
 
+                // Skip ANSI escape sequences (color codes, etc.)
                 if (c == '\x1B')
                 {
                     term.IsInEscape = true;
@@ -231,7 +244,6 @@ public class TerminalComponent : IComponent
                         term.IsInOsc = false;
                         term.IsInEscape = false;
                     }
-
                     continue;
                 }
 
@@ -241,37 +253,30 @@ public class TerminalComponent : IComponent
                     continue;
                 }
 
-                if (!term.InitialCleanupDone)
-                {
-                    if (c == '$' || c == '#')
-                    {
-                        term.OutputLines.Clear();
-                        term.OutputLines.Add("");
-                        term.InitialCleanupDone = true;
-                    }
-                    else continue;
-                }
-
+                // Handle backspace/delete
                 if (c == '\b' || c == '\x7f' || c == '\x08')
                 {
                     if (term.OutputLines.Count > 0 && term.OutputLines[^1].Length > 0)
                     {
                         term.OutputLines[^1] = term.OutputLines[^1][..^1];
                     }
-
                     continue;
                 }
 
+                // Skip carriage return
                 if (c == '\r') continue;
 
+                // Handle newline - add new empty line
                 if (c == '\n')
                 {
                     term.OutputLines.Add("");
                     continue;
                 }
 
+                // Skip control characters (except tab)
                 if (c < 32 && c != '\t') continue;
 
+                // Add character to current line
                 if (term.OutputLines.Count == 0) term.OutputLines.Add("");
                 term.OutputLines[^1] += c;
             }
@@ -447,10 +452,10 @@ public class TerminalComponent : IComponent
                 canvas.DrawCircle(tabRect.Left + 10, tabRect.MidY, 3.5f, activePaint);
             }
 
-            using var textP = new SKPaint { 
-                Color = isActive ? _theme.Foreground : _theme.Foreground.WithAlpha(150), 
+            using var textP = new SKPaint
+            {
+                Color = isActive ? _theme.Foreground : _theme.Foreground.WithAlpha(150),
                 IsAntialias = true,
-                TextSize = _font.Size
             };
     
             string title = term.Title;

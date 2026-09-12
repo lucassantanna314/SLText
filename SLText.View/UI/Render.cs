@@ -1,11 +1,23 @@
 using SkiaSharp;
 
+using SLText.View.Services;
+
 namespace SLText.View.UI;
 
 public partial class WindowManager
 {
      private void OnRender(double dt)
      {
+        // The surface is recreated on resize and can legitimately be absent for a frame. Skipping
+        // the frame beats a NullReferenceException on the render callback, which kills the process.
+        if (_surface == null) return;
+
+        if (!_firstFrameLogged)
+        {
+            _firstFrameLogged = true;
+            StartupLog.Write("OnRender: FIRST FRAME rendering", $"window={_window.Size.X}x{_window.Size.Y}");
+        }
+
         var canvas = _surface.Canvas;
         canvas.Clear(_currentTheme.Background);
 
@@ -26,11 +38,13 @@ public partial class WindowManager
         {
             var active = _tabManager.ActiveTab;
 
-            if (_currentFilePath != active.FilePath)
+            // The render loop must not drive state transitions: SyncActiveTab owns _currentFilePath,
+            // the syntax rules and the window title. Re-deriving them here meant a full re-highlight
+            // could be triggered from the render thread, racing with the input thread.
+            if (!ReferenceEquals(_renderedTab, active))
             {
-                _currentFilePath = active.FilePath;
-                _editor.UpdateSyntax(_currentFilePath);
-                UpdateTitle();
+                _renderedTab = active;
+                _editor.SetCurrentData(active.Buffer, active.Cursor);
             }
 
             if (_terminal.IsVisible)
@@ -42,12 +56,16 @@ public partial class WindowManager
             float editorBottom = height - footerHeight - terminalHeight;
 
             _editor.Bounds = new SKRect(explorerWidth, tabHeight, width, editorBottom);
-            _editor.SetCurrentData(active.Buffer, active.Cursor);
             _editor.Render(canvas);
+        }
+        else
+        {
+            _renderedTab = null;
         }
 
         _statusBar.Bounds = new SKRect(0, height - footerHeight, width, height);
-        _statusBar.FileInfo = string.IsNullOrEmpty(_currentFilePath) ? "New File" : Path.GetFileName(_currentFilePath);
+        string fileInfo = string.IsNullOrEmpty(_currentFilePath) ? "New File" : Path.GetFileName(_currentFilePath);
+        if (_statusBar.FileInfo != fileInfo) _statusBar.FileInfo = fileInfo;
         _statusBar.Render(canvas);
 
         if (_modal.IsVisible)

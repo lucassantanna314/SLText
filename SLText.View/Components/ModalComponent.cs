@@ -130,13 +130,25 @@ public class ModalComponent
         canvas.DrawRoundRect(rect, 4, 4, p);
         
         textPaint.Color = theme.Foreground;
-        float textX = rect.MidX - (textPaint.MeasureText(label) / 2);
+        // Measure with the SKFont that actually draws: SKPaint.MeasureText uses the paint's own
+        // legacy text size (12), not _font (14), which pushed every button label right of centre.
+        float textX = rect.MidX - (_font.MeasureText(label) / 2);
         canvas.DrawText(label, textX, rect.MidY + (_font.Size / 3), _font, textPaint);
     }
     
-    public bool HandleKeyDown(string key)
+    /// <summary>
+    /// Handles a key while the dialog is open. Returns true to swallow it.
+    /// </summary>
+    /// <remarks>
+    /// Modifiers must be rejected: the accelerator check used to match the key name alone, so
+    /// pressing Ctrl+N with the "save changes?" dialog open was read as "N" = No and discarded the
+    /// unsaved edits.
+    /// </remarks>
+    public bool HandleKeyDown(string key, bool ctrl, bool shift)
     {
         if (!IsVisible) return false;
+
+        if (ctrl || shift) return true;
 
         if (key == "S" || key == "Enter") 
         {

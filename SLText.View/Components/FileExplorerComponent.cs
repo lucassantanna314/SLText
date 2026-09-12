@@ -408,7 +408,9 @@ public class FileExplorerComponent : IComponent
             paint.Style = SKPaintStyle.Fill;
         }
 
-        using var textPaint = new SKPaint { Color = _theme.Foreground, IsAntialias = true, TextSize = 13 };
+        // TextSize on SKPaint is ignored by the SKFont overload of DrawText, so it only served to
+        // make the obsolete-API warning fire.
+        using var textPaint = new SKPaint { Color = _theme.Foreground, IsAntialias = true };
         canvas.DrawText(string.IsNullOrEmpty(_searchText) && !IsFocused ? "Search..." : _searchText, 
             searchRect.Left + 10, searchRect.MidY + 5, _font, textPaint);
         
@@ -436,7 +438,8 @@ public class FileExplorerComponent : IComponent
     private void RenderNode(SKCanvas canvas, FileNode node, ref float y, SKPaint paint)
     {
         float xOffset = Bounds.Left + 15 + (node.Level * 20); 
-        float textWidth = paint.MeasureText(node.Name);
+        // paint carries no usable text size; _font is what DrawText is given.
+        float textWidth = _font.MeasureText(node.Name);
         _maxContentWidth = Math.Max(_maxContentWidth, xOffset + textWidth + 50);
         
         bool isKbSelected = _kbSelectedIndex >= 0 && 

@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="SLText.Core/SLText.Core.csproj" />
   <Project Path="SLText.View/SLText.View.csproj" />
+  <Project Path="SLText.Core.Tests/SLText.Core.Tests.csproj" />
 </Solution>

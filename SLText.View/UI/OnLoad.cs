@@ -12,15 +12,48 @@ public partial class WindowManager
 {
     private void OnLoad()
     {
+        StartupLog.Write("OnLoad: begin");
+
         _isLoadingSession = true;
-        // Inicializa Skia com o contexto da GPU da Silk.NET
-        var interface_ = GRGlInterface.Create();
-        _grContext = GRContext.CreateGl(interface_);
+
+        // Inicializa Skia com o contexto da GPU da Silk.NET.
+        // Falha aqui precisa ser explícita: sem este check o primeiro frame morre com um
+        // NullReferenceException em OnRender, sem indicar que o problema foi o contexto GL.
+        //
+        // O resolver precisa vir do GLFW: GRGlInterface.Create() sem argumentos usa o loader nativo
+        // do Skia, que só reconhece um contexto GLX corrente e retorna null em sessão Wayland, onde
+        // o GLFW 3.4 cria contexto EGL. glfwGetProcAddress devolve o ponteiro certo nos dois casos.
+        StartupLog.Write("OnLoad: creating GRGlInterface");
+        var glContext = _window.GLContext
+            ?? throw new InvalidOperationException(
+                "A janela não expõe um contexto OpenGL (GLContext null). A GraphicsAPI precisa ser OpenGL.");
+        var glInterface = GRGlInterface.Create(proc => glContext.GetProcAddress(proc));
+        StartupLog.Write("OnLoad: GRGlInterface.Create returned", glInterface == null ? "NULL" : "ok");
+        if (glInterface == null)
+        {
+            throw new InvalidOperationException(
+                "Não foi possível criar a interface OpenGL (GRGlInterface.Create retornou null). " +
+                "Verifique se há um driver OpenGL disponível e se a sessão é X11 ou Wayland com suporte a GL.");
+        }
+
+        _grContext = GRContext.CreateGl(glInterface);
+        StartupLog.Write("OnLoad: GRContext.CreateGl returned", _grContext == null ? "NULL" : "ok");
+        if (_grContext == null)
+        {
+            throw new InvalidOperationException(
+                "Não foi possível criar o contexto GL do SkiaSharp (GRContext.CreateGl retornou null). " +
+                "Verifique o driver de vídeo / mesa e, em Wayland, tente iniciar uma sessão X11.");
+        }
+
         SetupSurface();
+        StartupLog.Write("OnLoad: surface ready", _surface == null ? "SURFACE IS NULL" : "ok");
         SetWindowIcon();
+        StartupLog.Write("OnLoad: window icon set");
         
         // Configura Input da Silk.NET
         var input = _window.CreateInput();
+        StartupLog.Write("OnLoad: input created",
+            $"keyboards={input.Keyboards.Count} mice={input.Mice.Count}");
         _primaryMouse = input.Mice[0];
 
         foreach (var keyboard in input.Keyboards)
@@ -33,7 +66,7 @@ public partial class WindowManager
             };
             
             
-            keyboard.KeyChar += async (k, c) =>
+            keyboard.KeyChar += (k, c) =>
             {
                 if (_commandPalette.IsVisible)
                 {
@@ -82,85 +115,14 @@ public partial class WindowManager
                 
                 RequestDiagnostics();
                 
-                try 
-                {
-                    string ext = Path.GetExtension(_currentFilePath ?? "").ToLower();
-                    if (ext != ".cs" && ext != ".razor") return;
-                    
-                    if (char.IsLetterOrDigit(c) || c == '.' || c == '_')
-                    {
-                        var pos = _editor.GetCursorScreenPosition();
-                        int flatOffset = _buffer.GetFlatOffset(_cursor.Line, _cursor.Column);
-                        string allText = _buffer.GetAllText();
+                if (!IsAnalyzableFile(_currentFilePath)) return;
 
-                        string partialWord = GetPartialWord(_buffer.GetLine(_cursor.Line), _cursor.Column);
+                if (char.IsLetterOrDigit(c) || c == '.' || c == '_') RequestCompletions();
+                else _autocomplete.IsVisible = false;
 
-                        // 2. Chama o LSP
-                        string path = _currentFilePath ?? "new_file.cs";
-                        var completions = await _lspService.GetCompletionsAsync(allText, flatOffset, path);
-
-                        if (completions != null && completions.Any())
-                        {
-                            var filtered = completions
-                                .Select(i => i.DisplayText)
-                                .Where(text => text.StartsWith(partialWord, StringComparison.OrdinalIgnoreCase))
-                                .ToList();
-
-                            if (filtered.Any())
-                            {
-                                _autocomplete.Show(pos.x, pos.y + 20, filtered); 
-                            }
-                            else
-                            {
-                                _autocomplete.IsVisible = false;
-                            }
-                        }
-                        else
-                        {
-                            _autocomplete.IsVisible = false;
-                        }
-                    }
-                    else
-                    {
-                        _autocomplete.IsVisible = false;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"UI Completion Dispatch Error: {ex.Message}");
-                }
-                
-                //help
-                if (c == '(' || c == ',')
-                {
-                    string ext = Path.GetExtension(_currentFilePath ?? "").ToLower();
-                    if (ext != ".cs" && ext != ".razor") return;
-                    
-                    var pos = _editor.GetCursorScreenPosition();
-                    int flatOffset = _buffer.GetFlatOffset(_cursor.Line, _cursor.Column);
-                    string code = _buffer.GetAllText();
-                    string path = _currentFilePath ?? "new_file.cs";
-
-                    var sigData = await _lspService.GetSignatureHelpAsync(code, flatOffset, path);
-        
-                    if (sigData != null && sigData.Signatures.Any())
-                    {
-                        _signatureHelp.Show(pos.x, pos.y, sigData);
-                    }
-                }
-                else if (c == ')')
-                {
-                    _signatureHelp.IsVisible = false; 
-                }
-                
-                else if (_signatureHelp.IsVisible)
-                {
-                    var pos = _editor.GetCursorScreenPosition();
-                    int flatOffset = _buffer.GetFlatOffset(_cursor.Line, _cursor.Column);
-                    var sigData = await _lspService.GetSignatureHelpAsync(_buffer.GetAllText(), flatOffset, _currentFilePath ?? "new.cs");
-                    if (sigData != null) _signatureHelp.Show(pos.x, pos.y, sigData);
-                    else _signatureHelp.IsVisible = false;
-                }
+                if (c == '(' || c == ',') RequestSignatureHelp();
+                else if (c == ')') _signatureHelp.IsVisible = false;
+                else if (_signatureHelp.IsVisible) RequestSignatureHelp();
             };
         }
 
@@ -250,20 +212,17 @@ public partial class WindowManager
                 int clickedIndex = _tabComponent.GetTabIndexAt(pos.X, pos.Y);
                 if (clickedIndex != -1)
                 {
-                    float relativeX = (pos.X - _tabComponent.Bounds.Left) % (130 + 2);
-
-                    if (relativeX > 100)
+                    // IsCloseButtonAt already restricts itself to the active tab, matching what is
+                    // actually drawn; no need to select first.
+                    if (_tabComponent.IsCloseButtonAt(pos.X, pos.Y))
                     {
-                        _tabManager.SelectTab(clickedIndex);
                         CloseActiveTab();
                         return;
                     }
 
-                    if (_tabManager.ActiveTab != null)
-                    {
-                        _tabManager.ActiveTab.SavedScrollX = _editor.ScrollX;
-                        _tabManager.ActiveTab.SavedScrollY = _editor.ScrollY;
-                    }
+                    // Persist the outgoing tab's scroll position before switching, so coming back
+                    // restores the view instead of jumping to the top.
+                    SaveActiveTabScroll();
 
                     _tabManager.SelectTab(clickedIndex);
                     SyncActiveTab(false);
@@ -286,21 +245,12 @@ public partial class WindowManager
                     return;
                 }
 
+                // Cursor shape is owned by OnUpdate, which already handles the terminal and
+                // explorer splitters and only touches GLFW when the shape actually changes.
                 if (_terminal.IsResizing)
                 {
                     _terminal.OnMouseMove(pos.X, pos.Y, _window.Size.Y);
-                    foreach (var mouse in input.Mice)
-                    {
-                        mouse.Cursor.StandardCursor = StandardCursor.VResize;
-                    }
                     return;
-                }
-                else
-                {
-                    foreach (var mouse in input.Mice)
-                    {
-                        mouse.Cursor.StandardCursor = StandardCursor.Default;
-                    }
                 }
 
                 if (_terminal.IsVisible)
@@ -449,7 +399,7 @@ public partial class WindowManager
                 {
                     try 
                     {
-                        var content = File.ReadAllText(filePath).Replace("\t", "    ");
+                        var content = File.ReadAllText(filePath);
                 
                         var buf = new TextBuffer(); 
                         buf.LoadText(content); 
@@ -487,5 +437,7 @@ public partial class WindowManager
         _editor.SetScroll(0, 0);
         
         UpdateTitle();
+        StartupLog.Write("OnLoad: complete - event loop should now render frames");
     }
+
 }

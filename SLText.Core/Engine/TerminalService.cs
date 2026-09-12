@@ -14,10 +14,15 @@ public class TerminalService
         var isWindows = OperatingSystem.IsWindows();
         var shell = isWindows ? "powershell.exe" : "/bin/bash";
 
+        // bash must NOT be started with -i. An interactive shell tries to take control of the
+        // process' terminal (tcsetpgrp / termios), and because this process runs with its stdio
+        // redirected to pipes it ends up blocked on the tty: the shell is stopped by SIGTTIN and
+        // takes the editor's process group down with it. Commands are fed in explicitly through
+        // SendCommand, which is all an embedded terminal panel needs.
         var startInfo = new ProcessStartInfo
         {
             FileName = shell,
-            Arguments = isWindows ? "-NoLogo -NoExit" : "-i",
+            Arguments = isWindows ? "-NoLogo -NoExit" : "--norc",
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -28,31 +33,60 @@ public class TerminalService
         };
 
         _process = new Process { StartInfo = startInfo };
-        _process.Start();
-
-        _input = new StreamWriter(_process.StandardInput.BaseStream, new UTF8Encoding()) 
-        { 
-            AutoFlush = true 
-        };
         
+        try
+        {
+            _process.Start();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Terminal] Failed to start shell: {ex.Message}");
+            return;
+        }
+
+        _input = new StreamWriter(_process.StandardInput.BaseStream, new UTF8Encoding())
+        {
+            AutoFlush = true
+        };
+
         _input.AutoFlush = true;
 
         Task.Run(() => ReadStream(_process.StandardOutput));
         Task.Run(() => ReadStream(_process.StandardError));
+
+        // Send initial command to get the shell prompt to display
+        // Bash --norc doesn't produce any output on startup
+        Task.Run(async () =>
+        {
+            await Task.Delay(150); // Small delay to ensure process is ready
+            SendCommand("echo ''\n");
+        });
 
     }
     
     private void ReadStream(StreamReader reader)
     {
         char[] buffer = new char[1024];
-        while (!_process!.HasExited)
+        try
         {
-            int count = reader.Read(buffer, 0, buffer.Length);
-            if (count > 0)
+            while (!_process!.HasExited)
             {
-                string data = new string(buffer, 0, count);
-                OnDataReceived?.Invoke(data);
+                int count = reader.Read(buffer, 0, buffer.Length);
+                if (count > 0)
+                {
+                    string data = new string(buffer, 0, count);
+                    OnDataReceived?.Invoke(data);
+                }
+                else
+                {
+                    // No data available, small delay to avoid busy-waiting
+                    Thread.Sleep(10);
+                }
             }
+        }
+        catch (Exception ex)
+        {
+            // Ignore exceptions during read (process may have exited)
         }
     }
 

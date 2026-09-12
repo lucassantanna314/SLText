@@ -58,6 +58,30 @@ public class CursorManager
         _desiredColumn = Column;
     }
 
+    public void MoveToLineStart()
+    {
+        Column = 0;
+        _desiredColumn = 0;
+    }
+
+    public void MoveToLineEnd()
+    {
+        Column = _buffer.GetLineLength(Line);
+        _desiredColumn = Column;
+    }
+
+    public void MovePageUp(int lines)
+    {
+        Line = Math.Max(0, Line - Math.Max(1, lines));
+        UpdateColumnToDesired();
+    }
+
+    public void MovePageDown(int lines)
+    {
+        Line = Math.Min(_buffer.LineCount - 1, Line + Math.Max(1, lines));
+        UpdateColumnToDesired();
+    }
+
     public void SetPosition(int line, int column)
     {
         Line = Math.Clamp(line, 0, _buffer.LineCount - 1);
