@@ -128,7 +128,24 @@ jobs:
       - name: Create .RPM Package
         run: |
           VERSION="0.${{ github.run_number }}"
-          
+
+          mkdir -p sltext-rpm/usr/bin
+          mkdir -p sltext-rpm/usr/share/applications
+          mkdir -p sltext-rpm/usr/share/icons/hicolor/256x256/apps
+          mkdir -p sltext-rpm/usr/share/metainfo
+
+          cp -r ./publish/linux/* sltext-rpm/usr/bin/
+
+          if [ -f "sltext-rpm/usr/bin/SLText" ]; then
+              mv sltext-rpm/usr/bin/SLText sltext-rpm/usr/bin/sltext
+          fi
+
+          chmod +x sltext-rpm/usr/bin/sltext
+
+          cp sltext.desktop sltext-rpm/usr/share/applications/sltext.desktop
+          cp SLText.View/Assets/icon.png sltext-rpm/usr/share/icons/hicolor/256x256/apps/sltext.png
+          cp sltext.metainfo.xml sltext-rpm/usr/share/metainfo/sltext.metainfo.xml
+
           fpm \
             --input-type dir \
             --output-type rpm \
@@ -149,16 +166,9 @@ jobs:
             --depends xclip \
             --depends xsel \
             --depends fontconfig \
-            --before-install /dev/null \
-            --after-install /dev/null \
-            --rpm-posttrans /dev/null \
             --rpm-digest sha256 \
-            --category "Application/TextEditor" \
-            -o "SLText_${VERSION}_Linux_x64.rpm" \
-            ./publish/linux/=usr/bin/ \
-            sltext.desktop=/usr/share/applications/sltext.desktop \
-            SLText.View/Assets/icon.png=/usr/share/icons/hicolor/256x256/apps/sltext.png \
-            sltext.metainfo.xml=/usr/share/metainfo/sltext.metainfo.xml
+            --package "SLText_${VERSION}_Linux_x64.rpm" \
+            sltext-rpm=/
 
       - name: Upload Linux RPM Artifact
         uses: actions/upload-artifact@v4
