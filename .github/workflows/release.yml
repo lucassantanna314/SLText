@@ -154,11 +154,11 @@ jobs:
             --rpm-posttrans /dev/null \
             --rpm-digest sha256 \
             --category "Application/TextEditor" \
+            -o "SLText_${VERSION}_Linux_x64.rpm" \
             ./publish/linux/=usr/bin/ \
             sltext.desktop=/usr/share/applications/sltext.desktop \
             SLText.View/Assets/icon.png=/usr/share/icons/hicolor/256x256/apps/sltext.png \
-            sltext.metainfo.xml=/usr/share/metainfo/sltext.metainfo.xml \
-            -o "SLText_${VERSION}_Linux_x64.rpm"
+            sltext.metainfo.xml=/usr/share/metainfo/sltext.metainfo.xml
 
       - name: Upload Linux RPM Artifact
         uses: actions/upload-artifact@v4
