@@ -119,22 +119,19 @@ jobs:
           mkdir -p sltext-rpm/BUILD
           mkdir -p sltext-rpm/SOURCES
           mkdir -p sltext-rpm/SPECS
-          mkdir -p sltext-rpm/tmp_install
-
-          cp -r ./publish/linux/* sltext-rpm/tmp_install/
-
-          if [ -f "sltext-rpm/tmp_install/SLText" ]; then
-              mv sltext-rpm/tmp_install/SLText sltext-rpm/tmp_install/sltext
-          fi
-
-          chmod +x sltext-rpm/tmp_install/sltext
-
           mkdir -p sltext-rpm/tmp_install/usr/bin
           mkdir -p sltext-rpm/tmp_install/usr/share/applications
           mkdir -p sltext-rpm/tmp_install/usr/share/icons/hicolor/256x256/apps
           mkdir -p sltext-rpm/tmp_install/usr/share/metainfo
 
-          mv sltext-rpm/tmp_install/sltext sltext-rpm/tmp_install/usr/bin/
+          cp -r ./publish/linux/* sltext-rpm/tmp_install/usr/bin/
+
+          if [ -f "sltext-rpm/tmp_install/usr/bin/SLText" ]; then
+              mv sltext-rpm/tmp_install/usr/bin/SLText sltext-rpm/tmp_install/usr/bin/sltext
+          fi
+
+          chmod +x sltext-rpm/tmp_install/usr/bin/sltext
+
           cp SLText.View/Assets/icon.png sltext-rpm/tmp_install/usr/share/icons/hicolor/256x256/apps/sltext.png
           cp sltext.metainfo.xml sltext-rpm/tmp_install/usr/share/metainfo/sltext.metainfo.xml
 
