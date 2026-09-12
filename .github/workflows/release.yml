@@ -87,13 +87,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install ICU library
+        run: dnf install -y libicu
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0
-
-      - name: Install rpm-build
-        run: dnf install -y rpm-build
 
       - name: Restore
         run: dotnet restore
