@@ -168,7 +168,7 @@ jobs:
             --depends fontconfig \
             --rpm-digest sha256 \
             --package "SLText_${VERSION}_Linux_x64.rpm" \
-            sltext-rpm=/
+            sltext-rpm
 
       - name: Upload Linux RPM Artifact
         uses: actions/upload-artifact@v4
