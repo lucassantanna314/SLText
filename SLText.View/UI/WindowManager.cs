@@ -11,6 +11,7 @@ using SLText.Core.Engine.Model;
 using SLText.View.Services;
 using SLText.View.Styles;
 using SLText.View.UI.Input;
+using SLText.Components;
 
 namespace SLText.View.UI;
 
@@ -54,6 +55,7 @@ public partial class WindowManager : IDisposable
     private MouseHandler _mouseHandler;
     private ModalComponent _modal = new();
     private SearchComponent _search = new();
+    private ContextMenuComponent _contextMenu = new();
 
     private TabManager _tabManager = new();
     private TabComponent _tabComponent;
@@ -63,7 +65,7 @@ public partial class WindowManager : IDisposable
     private TerminalComponent _terminal;
     private bool _isTerminalFocused = false;
     private IMouse? _primaryMouse;
-    
+
     private LspService _lspService = new();
     private AutocompleteComponent _autocomplete;
     private SignatureHelpComponent _signatureHelp;
@@ -100,10 +102,10 @@ public partial class WindowManager : IDisposable
         _tabManager = new TabManager();
         _tabComponent = new TabComponent(_tabManager);
         _tabManager.AddTab(buffer, cursor, null);
-        _editor.SetCurrentData(_tabManager.ActiveTab!.Buffer, _tabManager.ActiveTab.Cursor);        _terminal = new TerminalComponent();
+        _editor.SetCurrentData(_tabManager.ActiveTab!.Buffer, _tabManager.ActiveTab.Cursor); _terminal = new TerminalComponent();
         _autocomplete = new AutocompleteComponent(_editor.Font);
         _signatureHelp = new SignatureHelpComponent();
-        
+
         _settings = settings;
         _currentFilePath = initialFilePath;
 
@@ -140,7 +142,7 @@ public partial class WindowManager : IDisposable
                     var settings = SettingsService.Load();
                     settings.LastRootDirectory = folder;
                     SettingsService.SaveImmediate(settings);
-                    
+
                     _explorer.SetRootDirectory(folder);
                     _explorer.IsVisible = true;
                     _terminal.SetWorkingDirectory(folder);
@@ -148,14 +150,14 @@ public partial class WindowManager : IDisposable
                     _editor.SetDiagnostics(new List<LspService.MappedDiagnostic>());
                     _terminal.ShowDiagnostics(new List<LspService.MappedDiagnostic>(), "Project Loaded");
                     _diagnosticCts?.Cancel();
-                    
+
                     _terminal.WriteOutput("Output", $"Open folder: {folder}", clearFirst: true);
-                    
-                    Task.Run(() => 
+
+                    Task.Run(() =>
                     {
-                        try 
+                        try
                         {
-                            _lspService.LoadProjectFiles(folder, (statusMessage) => 
+                            _lspService.LoadProjectFiles(folder, (statusMessage) =>
                             {
                                 _terminal.WriteOutput("Output", statusMessage);
                             });
@@ -189,7 +191,7 @@ public partial class WindowManager : IDisposable
                 ApplyTheme(EditorTheme.Dark);
                 SyncSettings();
             }
-                
+
         };
 
         _inputHandler.OnNewTerminalTabRequested += () =>
@@ -212,47 +214,38 @@ public partial class WindowManager : IDisposable
             }
         };
 
-        _inputHandler.OnRunRequested += () =>
-        {
-            ExecuteActiveConfiguration();
-        };
+        _inputHandler.OnRunRequested += ExecuteActiveConfiguration;
 
-        _inputHandler.OnRunConfigurationSelectorRequested += () =>
-        {
-            OpenRunConfigurationSelector();
-        };
+        _inputHandler.OnRunConfigurationSelectorRequested += OpenRunConfigurationSelector;
 
         _inputHandler.OnStopRequested += () =>
         {
             _terminal.ShutdownAllTerminals();
         };
 
-        _editor.OnRunTestRequested += (line) =>
-        {
-            HandleRunTest(line);
-        };
-        
+        _editor.OnRunTestRequested += HandleRunTest;
+
         _editor.OnQuickFixRequested += async (line, symbolText) =>
         {
             string ext = Path.GetExtension(_currentFilePath ?? "").ToLower();
             if (ext != ".cs") return;
-            
+
             var namespaces = await _lspService.GetTypeNamespacesAsync(symbolText);
-    
+
             if (namespaces.Any())
             {
                 var suggestions = namespaces.Select(ns => $"using {ns};").ToList();
-        
-                var pos = _editor.GetCursorScreenPosition(); 
-        
+
+                var pos = _editor.GetCursorScreenPosition();
+
                 _cursor.SetPosition(line, 0);
                 pos = _editor.GetCursorScreenPosition();
 
                 _autocomplete.Show(pos.x + 30, pos.y, suggestions);
-        
+
             }
         };
-        
+
         _inputHandler.OnReloadProjectRequested += () =>
         {
             if (string.IsNullOrEmpty(_lastDirectory))
@@ -262,27 +255,27 @@ public partial class WindowManager : IDisposable
             }
 
             if (!_terminal.IsVisible) _terminal.IsVisible = true;
-    
+
             var buildTab = _terminal.CreateNewTab("Build-Reload", _lastDirectory, forceNew: false);
-    
+
             lock (buildTab.OutputLines) { buildTab.OutputLines.Clear(); buildTab.OutputLines.Add("--- Starting Build for Reload ---"); }
-    
+
             buildTab.Service.SendCommand("dotnet build\n");
             _terminal.ShowDiagnostics(new List<LspService.MappedDiagnostic>(), "Reloading References...");
 
             Task.Run(async () =>
             {
-                try 
+                try
                 {
                     await Task.Delay(5000);
 
                     _terminal.WriteOutput("Output", "Reloading references after build...", clearFirst: false);
 
-                    _lspService.LoadProjectFiles(_lastDirectory, (msg) => 
+                    _lspService.LoadProjectFiles(_lastDirectory, (msg) =>
                     {
                         _terminal.WriteOutput("Output", msg);
                     });
-                    
+
                     _editor.SetDiagnostics(new List<LspService.MappedDiagnostic>());
                     RequestDiagnostics(instant: true);
                 }
@@ -292,14 +285,130 @@ public partial class WindowManager : IDisposable
                 }
             });
         };
-        
-        _explorer.OnFileOpenRequested += (path) => 
+
+        _explorer.OnFileOpenRequested += (path) =>
         {
             SetCurrentFile(path);
-            _explorer.IsFocused = false; 
+            _explorer.IsFocused = false;
+        };
+
+        _editor.OnRightClickRequested += (screenX, screenY, line, col) =>
+        {
+            var items = new List<ContextMenuItem>();
+
+            string ext = Path.GetExtension(_currentFilePath ?? "").ToLowerInvariant();
+            if (ext is ".cs" or ".razor")
+            {
+                string currentLine = _buffer.GetLine(Math.Clamp(line, 0, _buffer.LineCount - 1));
+                int bufferCol = Math.Clamp(col, 0, currentLine.Length);
+
+                // .razor: pode ter @ antes do identificador — verifique se há identificador válido a seguir
+                if (ext == ".razor" && bufferCol >= 0 && currentLine[bufferCol] == '@' && currentLine.Length > bufferCol + 1)
+                {
+                    char nextChar = currentLine[bufferCol + 1];
+                    if (char.IsLetterOrDigit(nextChar))
+                    {
+                        bufferCol++;
+                    }
+                    else
+                    {
+                        bufferCol = -1;
+                    }
+                }
+
+                bool hasIdentifier = bufferCol >= 0 && bufferCol < currentLine.Length
+                    && (char.IsLetterOrDigit(currentLine[bufferCol]) || currentLine[bufferCol] == '_');
+
+                // Pega a palavra inteira para checar contra keywords C#
+                string word = "";
+                if (hasIdentifier)
+                {
+                    int start = bufferCol;
+                    while (start > 0 && (char.IsLetterOrDigit(currentLine[start - 1]) || currentLine[start - 1] == '_'))
+                        start--;
+                    int end = bufferCol;
+                    while (end < currentLine.Length && (char.IsLetterOrDigit(currentLine[end]) || currentLine[end] == '_'))
+                        end++;
+                    word = currentLine.Substring(start, end - start);
+                    bool isKeyword = word switch
+                    {
+                        "abstract" or "as" or "base" or "break" or "case" or "catch" or "class" or "const"
+                        or "continue" or "decimal" or "default" or "do" or "else" or "enum" or "event"
+                        or "explicit" or "extern" or "false" or "finally" or "for" or "foreach" or "goto"
+                        or "if" or "implicit" or "in" or "interface" or "internal" or "is" or "lock"
+                        or "long" or "namespace" or "new" or "null" or "object" or "operator" or "out"
+                        or "override" or "params" or "private" or "protected" or "public" or "readonly"
+                        or "return" or "sealed" or "sizeof" or "static" or "struct" or "switch" or "throw"
+                        or "true" or "try" or "typeof" or "uint" or "ulong" or "unchecked" or "unsafe"
+                        or "ushort" or "using" or "virtual" or "void" or "while" => true,
+                        _ => false
+                    };
+                    hasIdentifier = !isKeyword;
+                }
+
+                if (hasIdentifier)
+                {
+                    items.Add(new ContextMenuItem
+                    {
+                        Label = "Go to Definition",
+                        Shortcut = "F12",
+                        Action = () => GoToDefinition(line, col)
+                    });
+                }
+            }
+
+            if (items.Count > 0)
+            {
+                _contextMenu.Show(screenX, screenY, items);
+            }
         };
     }
-    
+
+    private async void GoToDefinition(int line, int col)
+    {
+        if (string.IsNullOrEmpty(_currentFilePath)) return;
+
+        try
+        {
+            var result = await _lspService.GetDefinitionAsync(_currentFilePath, line, col);
+            if (result.HasValue)
+            {
+                var (targetPath, targetLine, targetCol) = result.Value;
+
+                // Reutiliza tab já aberta, ou reusa a única tab vazia, ou cria nova.
+                var existingTab = _tabManager.Tabs.FirstOrDefault(t => t.FilePath == targetPath);
+                if (existingTab != null)
+                {
+                    _tabManager.SelectTab(_tabManager.Tabs.IndexOf(existingTab));
+                }
+                else if (_tabManager.Tabs.Count == 1 && string.IsNullOrEmpty(_tabManager.Tabs[0].FilePath))
+                {
+                    var tab = _tabManager.Tabs[0];
+                    tab.Buffer.LoadText(File.ReadAllText(targetPath));
+                    tab.FilePath = targetPath;
+                    tab.IsDirty = false;
+                }
+                else
+                {
+                    var newBuffer = new TextBuffer();
+                    newBuffer.LoadText(File.ReadAllText(targetPath));
+                    _tabManager.AddTab(newBuffer, new CursorManager(newBuffer), targetPath);
+                }
+
+                // Sincroniza todos os handlers com a nova aba antes de posicionar o cursor.
+                SyncActiveTab(false);
+
+                // Posiciona o cursor e centraliza o scroll.
+                _cursor.SetPosition(targetLine, targetCol);
+                _editor.EnsureCursorVisible();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[GoToDefinition] Falha ao ir para definição: {ex.Message}");
+        }
+    }
+
 
     /// <summary>
     /// Shared by the keyboard and mouse tab-switch paths.
@@ -351,7 +460,7 @@ public partial class WindowManager : IDisposable
         _search.IsVisible = true;
         _search.Clear();
     }
-    
+
     private string GetPartialWord(string line, int column)
     {
         if (string.IsNullOrEmpty(line) || column == 0) return "";
@@ -360,13 +469,13 @@ public partial class WindowManager : IDisposable
         while (start >= 0)
         {
             char c = line[start];
-            if (!char.IsLetterOrDigit(c) && c != '_') 
+            if (!char.IsLetterOrDigit(c) && c != '_')
             {
-                break; 
+                break;
             }
             start--;
         }
-    
+
         return line.Substring(start + 1, column - (start + 1));
     }
 
@@ -448,7 +557,7 @@ public partial class WindowManager : IDisposable
     }
 
     private StandardCursor _lastAppliedCursor = StandardCursor.Default;
-    
+
     private void OnResize(Silk.NET.Maths.Vector2D<int> size) => SetupSurface();
 
     private void SetupSurface()

@@ -69,7 +69,7 @@ public partial class WindowManager
     }
     private void ProcessKeyPress(Key key)
     {
-        bool ctrl = _activeKeyboard.IsKeyPressed(Key.ControlLeft) || _activeKeyboard.IsKeyPressed(Key.ControlRight);
+        bool ctrl = _activeKeyboard!.IsKeyPressed(Key.ControlLeft) || _activeKeyboard.IsKeyPressed(Key.ControlRight);
         bool shift = _activeKeyboard.IsKeyPressed(Key.ShiftLeft) || _activeKeyboard.IsKeyPressed(Key.ShiftRight);
 
         if (_isTerminalFocused && _terminal.IsVisible)
@@ -214,6 +214,17 @@ public partial class WindowManager
                 UpdateTitle();
             }
             return;
+        }
+
+        // Handle F12 for Go-To-Definition (not a text-edit key).
+        if (!ctrl && !shift && mappedKey == "F12")
+        {
+            var activeTab = _tabManager.ActiveTab;
+            if (activeTab != null)
+            {
+                GoToDefinition(activeTab.Cursor.Line, activeTab.Cursor.Column);
+                return;
+            }
         }
 
         _inputHandler.HandleShortcut(ctrl, shift, mappedKey);

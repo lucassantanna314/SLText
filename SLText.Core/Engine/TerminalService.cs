@@ -29,11 +29,11 @@ public class TerminalService
             UseShellExecute = false,
             CreateNoWindow = true,
             WorkingDirectory = workingDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            StandardOutputEncoding = System.Text.Encoding.UTF8
+            StandardOutputEncoding = Encoding.UTF8
         };
 
         _process = new Process { StartInfo = startInfo };
-        
+
         try
         {
             _process.Start();
@@ -58,12 +58,21 @@ public class TerminalService
         // Bash --norc doesn't produce any output on startup
         Task.Run(async () =>
         {
-            await Task.Delay(150); // Small delay to ensure process is ready
-            SendCommand("echo ''\n");
+            await Task.Delay(150); // Aguarda o processo inicializar
+        
+            if (isWindows)
+            {
+                SendCommand("\n");
+            }
+            else
+            {
+                // Configura o prompt para exibir usuario@hostname:diretorio$ no bash
+                SendCommand("export PROMPT_COMMAND='printf \"\\n%s@%s:%s$ \" \"$USER\" \"${HOSTNAME:-$(hostname)}\" \"$PWD\"'; echo -n \"$USER@${HOSTNAME:-$(hostname)}:$PWD$ \"\n");
+            }
         });
 
     }
-    
+
     private void ReadStream(StreamReader reader)
     {
         char[] buffer = new char[1024];
@@ -84,13 +93,13 @@ public class TerminalService
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // Ignore exceptions during read (process may have exited)
         }
     }
 
-    public void SendCommand(string cmd) 
+    public void SendCommand(string cmd)
     {
         if (_input != null)
         {
@@ -98,38 +107,38 @@ public class TerminalService
             _input.Flush();
         }
     }
-    
+
     public void Stop()
     {
         try
         {
             if (_process != null && !_process.HasExited)
             {
-                _process.Kill(true); 
+                _process.Kill(true);
                 _process.Dispose();
             }
         }
         catch {/* */ }
     }
-    
+
     public void SendInterrupt()
     {
         SendCommand("\x03");
     }
-    
+
     public void Restart(string? workingDirectory = null)
     {
-        Stop(); 
+        Stop();
         Start(workingDirectory);
     }
-    
+
     public bool IsProcessRunning()
     {
         if (_process == null || _process.HasExited) return false;
 
         try
         {
-            return !_process.HasExited; 
+            return !_process.HasExited;
         }
         catch { return false; }
     }

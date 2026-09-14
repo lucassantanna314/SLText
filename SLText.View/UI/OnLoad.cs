@@ -133,6 +133,15 @@ public partial class WindowManager
             mouse.MouseDown += (m, button) =>
             {
                 var pos = m.Position;
+
+                if (button == MouseButton.Left && _contextMenu.IsVisible)
+                {
+                    if (_contextMenu.HandleClick(pos.X, pos.Y)) return;
+                }
+                else if (_contextMenu.IsVisible)
+                {
+                    _contextMenu.IsVisible = false;
+                }
                 
                 if (_autocomplete.IsVisible && _autocomplete.Bounds.Contains(pos.X, pos.Y))
                 {
@@ -231,6 +240,11 @@ public partial class WindowManager
 
                 if (_editor.Bounds.Contains(pos.X, pos.Y))
                 {
+                    if (button == MouseButton.Right)
+                    {
+                        _editor.HandleRightClick(pos.X, pos.Y);
+                        return;
+                    }
                     if (_editor.OnMouseDown(pos.X, pos.Y)) return;
                     _mouseHandler.OnMouseDown(pos.X, pos.Y, button);
                 }
@@ -238,7 +252,11 @@ public partial class WindowManager
 
             mouse.MouseMove += (m, pos) =>
             {
-
+                if (_contextMenu.IsVisible)
+                {
+                    _contextMenu.OnMouseMove(pos.X, pos.Y);
+                }
+                
                 if (_isResizingExplorer)
                 {
                     _explorer.Width = Math.Clamp(pos.X, 100, 500);

@@ -43,11 +43,12 @@ public class EditorComponent : IComponent, IZoomable
     private bool _isDraggingHorizontal;
     private float _lastMouseY;
     private float _lastMouseX;
-    
+
     public event Action<int>? OnRunTestRequested;
     public event Action<int, string>? OnQuickFixRequested;
+    public event Action<float, float, int, int>? OnRightClickRequested;
     private static readonly Regex TestAttributeRegex = new Regex(@"\[(Test|Fact|TestMethod|TestClass)\]", RegexOptions.Compiled);
-    
+
     private List<LspService.MappedDiagnostic> _diagnostics = new();
 
     /// <summary>Diagnostics indexed by 1-based line, rebuilt only when the set changes.</summary>
@@ -91,7 +92,7 @@ public class EditorComponent : IComponent, IZoomable
 
     internal IReadOnlyList<LspService.MappedDiagnostic> GetDiagnosticsForLine(int oneBasedLine) =>
         _diagnosticsByLine.TryGetValue(oneBasedLine, out var list) ? list : Array.Empty<LspService.MappedDiagnostic>();
-    
+
     public EditorComponent(TextBuffer buffer, CursorManager cursor)
     {
         _buffer = buffer;
@@ -113,7 +114,7 @@ public class EditorComponent : IComponent, IZoomable
         _bracketRenderer = new BracketRenderer(_font, _theme);
         _indentGuideRenderer = new IndentGuideRenderer(_theme);
     }
-    
+
     private void RenderDiagnostics(SKCanvas canvas, int lineIndex, float textX, float yPos)
     {
         var lineErrors = GetDiagnosticsForLine(lineIndex + 1);
@@ -151,7 +152,7 @@ public class EditorComponent : IComponent, IZoomable
         var visibleLineNumbers = Enumerable.Range(1, lines.Count).ToList();
 
         _gutterRenderer.Render(canvas, Bounds, visibleLineNumbers, _lineHeight, _viewport.ScrollY, _buffer);
-        
+
         canvas.Save();
         try
         {
@@ -272,7 +273,7 @@ public class EditorComponent : IComponent, IZoomable
             _searchResults = new List<SearchResult>();
         }
 
-        _viewport.UpdateBounds(Bounds); 
+        _viewport.UpdateBounds(Bounds);
 
     }
 
@@ -314,22 +315,22 @@ public class EditorComponent : IComponent, IZoomable
     public void HandleGutterClick(float x, float y)
     {
         float gutterWidth = _gutterRenderer.GetWidth(_buffer.LineCount);
-        
+
         if (x < Bounds.Left + gutterWidth)
         {
             var (line, _) = GetTextPositionFromMouse(x, y);
-            
+
             string lineContent = _buffer.GetLine(line);
             if (TestAttributeRegex.IsMatch(lineContent))
             {
-                OnRunTestRequested?.Invoke(line); 
+                OnRunTestRequested?.Invoke(line);
                 return;
             }
-            
-            var error = _diagnostics.FirstOrDefault(d => 
-                d.Line == line + 1 && 
+
+            var error = _diagnostics.FirstOrDefault(d =>
+                d.Line == line + 1 &&
                 d.Id == "CS0246");
-            
+
             if (error != null)
             {
                 // Diagnostics can be a pass behind the buffer (they are computed asynchronously), so
@@ -410,9 +411,9 @@ public class EditorComponent : IComponent, IZoomable
         _font.GetFontMetrics(out var metrics);
 
         float gutterWidth = _gutterRenderer.GetWidth(_buffer.LineCount);
-    
+
         float localX = x - Bounds.Left - gutterWidth - 10;
-    
+
         float localY = y - Bounds.Top;
 
         var (line, displayCol) = _viewport.GetTextPosition(
@@ -590,12 +591,20 @@ public class EditorComponent : IComponent, IZoomable
         _isDraggingVertical = false;
         _isDraggingHorizontal = false;
     }
-    
+
+    public void HandleRightClick(float x, float y)
+    {
+        var (line, col) = GetTextPositionFromMouse(x, y);
+        _cursor.SetPosition(line, col);
+        EnsureCursorVisible();
+        OnRightClickRequested?.Invoke(x, y, line, col);
+    }
+
     public (float x, float y) GetCursorScreenPosition()
     {
         _font.GetFontMetrics(out var metrics);
         float gutterWidth = GetGutterWidth();
-    
+
         string lineText = _buffer.GetLine(_cursor.Line);
         float cursorX = MeasureToColumn(lineText, _cursor.Column);
 

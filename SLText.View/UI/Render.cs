@@ -95,6 +95,11 @@ public partial class WindowManager
             _signatureHelp.Render(canvas, _currentTheme);
         }
 
+        if (_contextMenu.IsVisible)
+        {
+            _contextMenu.Render(canvas);
+        }
+
         _grContext.Flush();
     }
 }
