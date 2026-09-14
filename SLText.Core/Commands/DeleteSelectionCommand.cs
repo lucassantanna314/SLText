@@ -3,18 +3,12 @@ using SLText.Core.Interfaces;
 
 namespace SLText.Core.Commands;
 
-public class DeleteSelectionCommand : ICommand
+public class DeleteSelectionCommand(TextBuffer buffer, CursorManager cursor) : ICommand
 {
-    private readonly TextBuffer _buffer;
-    private readonly CursorManager _cursor;
-    private TextMemento _snapshot;
-    
-    public DeleteSelectionCommand(TextBuffer buffer, CursorManager cursor)
-    {
-        _buffer = buffer;
-        _cursor = cursor;
-    }
-    
+    private readonly TextBuffer _buffer = buffer;
+    private readonly CursorManager _cursor = cursor;
+    private TextMemento? _snapshot;
+
     public void Execute()
     {
         _snapshot = _buffer.TakeSnapshot(_cursor.Line, _cursor.Column);
@@ -33,7 +27,7 @@ public class DeleteSelectionCommand : ICommand
 
     public void Undo()
     {
-        _buffer.RestoreSnapshot(_snapshot);
-        _cursor.SetPosition(_snapshot.CursorLine, _snapshot.CursorColumn);
+        _buffer.RestoreSnapshot(_snapshot!);
+        _cursor.SetPosition(_snapshot!.CursorLine, _snapshot.CursorColumn);
     }
 }

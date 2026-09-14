@@ -78,7 +78,7 @@ public class SignatureHelpComponent
         {
             float currentX = rect.Left + padding;
 
-            string prefix = sig.Label.Split('(')[0] + "(";
+            string prefix = sig.Label!.Split('(')[0] + "(";
             canvas.DrawText(prefix, currentX, currentY, _font, methodPaint); // Usa cor de método
             currentX += _font.MeasureText(prefix);
 
@@ -86,11 +86,11 @@ public class SignatureHelpComponent
             {
                 var param = sig.Parameters[i];
                 
-                bool isActive = (i == _data.ActiveParameter);
+                bool isActive = i == _data.ActiveParameter;
                 var fontToUse = isActive ? _boldFont : _font;
                 var paintToUse = isActive ? activeParamPaint : textPaint;
 
-                string paramText = param.Display;
+                string paramText = param.Display!;
                 
                 if (i < sig.Parameters.Count - 1) paramText += ", ";
 

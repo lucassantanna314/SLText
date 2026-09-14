@@ -37,7 +37,7 @@ public class UndoManager
     {
         if (_history.Count == 0) return;
 
-        var command = _history.Last.Value;
+        var command = _history!.Last!.Value;
         _history.RemoveLast();
 
         command.Undo();

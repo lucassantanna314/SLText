@@ -16,34 +16,25 @@ public class FileExplorerComponent : IComponent
     private List<FileNode> _rootNodes = new();
     private string? _currentRootPath;
     private const float ItemHeight = 25;
-    public bool HasRoot => !string.IsNullOrEmpty(_currentRootPath);
     
     private float _scrollY = 0;
-    public float ScrollY { get => _scrollY; set => _scrollY = value; }
     private float _maxContentWidth = 0; 
     private string? _selectedFilePath;
     
     private float _scrollX = 0;
-    public float ScrollX { get => _scrollX; set => _scrollX = value; }
     
-    private bool _isDragging;
     private float _lastMouseY;
     private float _lastMouseX;
-    private bool _hasMovedEnough;
-    private const float DragThreshold = 5f;
     
     private bool _isDraggingVertical;
     private bool _isDraggingHorizontal;
     
     private string _searchText = "";
-    public string SearchText => _searchText;
     public bool IsFocused { get; set; }
-    private readonly SKRect _searchBoxHeight = new(0, 0, 0, 40);
     private List<FileNode> _filteredNodes = new();
     private List<FileNode> _flattenedVisibleNodes = new();
     private int _kbSelectedIndex = -1;
     public event Action<string>? OnFileOpenRequested;
-    public event Action<FileNode>? OnFolderToggleRequested;
     private HashSet<string> _userExpandedPaths = new();
     private static readonly string[] ForbiddenFolders = { "bin", "obj", ".git", ".vs", "node_modules" };
     public void SetSelectedFile(string? path) 

@@ -147,7 +147,7 @@ public class CursorManager
     {
         if (!HasSelection) return null;
 
-        var start = (l: SelectionAnchorLine.Value, c: SelectionAnchorColumn.Value);
+        var start = (l: SelectionAnchorLine!.Value, c: SelectionAnchorColumn!.Value);
         var end = (l: Line, c: Column);
 
         if (start.l < end.l || (start.l == end.l && start.c < end.c))

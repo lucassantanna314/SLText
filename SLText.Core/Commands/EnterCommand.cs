@@ -4,19 +4,12 @@ using SLText.Core.Interfaces;
 
 namespace SLText.Core.Commands;
 
-public class EnterCommand : ICommand
+public class EnterCommand(TextBuffer buffer, CursorManager cursor, string? filePath) : ICommand
 {
-    private readonly TextBuffer _buffer;
-    private readonly CursorManager _cursor;
-    private readonly string? _filePath;
-    private TextMemento _snapshot;
-
-    public EnterCommand(TextBuffer buffer, CursorManager cursor, string? filePath)
-    {
-        _buffer = buffer;
-        _cursor = cursor;
-        _filePath = filePath;
-    }
+    private readonly TextBuffer _buffer = buffer;
+    private readonly CursorManager _cursor = cursor;
+    private readonly string? _filePath = filePath;
+    private TextMemento? _snapshot;
 
     public void Execute()
     {
