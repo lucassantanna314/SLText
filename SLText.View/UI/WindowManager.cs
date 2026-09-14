@@ -76,16 +76,17 @@ public partial class WindowManager : IDisposable
     private string _lastDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     private EditorSettings _settings;
     private bool _isLoadingSession = true;
+    private int _currentThemeIndex = 0;
 
     public WindowManager(TextBuffer buffer, CursorManager cursor, InputHandler input, string? initialFilePath, EditorSettings settings)
     {
         var options = WindowOptions.Default;
         options.Size = new Silk.NET.Maths.Vector2D<int>(800, 600);
         options.Title = "SLText";
-        StartupLog.Write("WindowManager ctor: creating GLFW window");
+        // StartupLog.Write("WindowManager ctor: creating GLFW window");
         _window = Window.Create(options);
-        StartupLog.Write("WindowManager ctor: window created",
-            $"API={_window.API} size={_window.Size.X}x{_window.Size.Y}");
+        //StartupLog.Write("WindowManager ctor: window created",
+        //    $"API={_window.API} size={_window.Size.X}x{_window.Size.Y}");
         _window.Closing += OnWindowClosing;
 
 
@@ -179,19 +180,14 @@ public partial class WindowManager : IDisposable
             _explorer.IsFocused = true;
         };
 
+         _currentThemeIndex = AvailableThemes.IndexOf(_currentTheme);
+        if (_currentThemeIndex == -1) _currentThemeIndex = 0;
+
         _inputHandler.OnThemeToggleRequested += () =>
         {
-            if (_currentTheme.Background.Red < 128)
-            {
-                ApplyTheme(EditorTheme.Light);
-                SyncSettings();
-            }
-            else
-            {
-                ApplyTheme(EditorTheme.Dark);
-                SyncSettings();
-            }
-
+            _currentThemeIndex = (_currentThemeIndex + 1) % AvailableThemes.Count;
+            ApplyTheme(AvailableThemes[_currentThemeIndex]);
+            SyncSettings();
         };
 
         _inputHandler.OnNewTerminalTabRequested += () =>
@@ -577,8 +573,18 @@ public partial class WindowManager : IDisposable
         _surface = SKSurface.Create(_grContext, target, GRSurfaceOrigin.BottomLeft, SKColorType.Rgba8888)
                    ?? throw new InvalidOperationException($"Could not create a {width}x{height} Skia surface.");
 
-        StartupLog.Write("SetupSurface: created", $"{width}x{height}");
+        //StartupLog.Write("SetupSurface: created", $"{width}x{height}");
     }
+
+    private static readonly List<EditorTheme> AvailableThemes =
+    [
+        EditorTheme.Dark,
+        EditorTheme.Midnight,
+        EditorTheme.Nordic,
+        EditorTheme.Light,
+        EditorTheme.Sepia,
+        EditorTheme.Rose
+    ];
 
     public void Dispose()
     {

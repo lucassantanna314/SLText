@@ -32,7 +32,7 @@ public partial class WindowManager
         if (_isLoadingSession) return;
         var settings = SettingsService.Load();
         settings.FontSize = _editor.FontSize;
-        settings.Theme = _currentTheme.Background.Red < 128 ? "Dark" : "Light";
+        settings.Theme = _currentTheme.Name; 
         settings.LastRootDirectory = _lastDirectory;
     
         settings.OpenTabs = _tabManager.Tabs
@@ -116,6 +116,6 @@ public partial class WindowManager
     private void OnWindowClosing()
     {
         _terminal.ShutdownAllTerminals();
-        Console.WriteLine("Aplicação e sub-processos encerrados com sucesso.");
+        //Console.WriteLine("Aplicação e sub-processos encerrados com sucesso.");
     }
 }

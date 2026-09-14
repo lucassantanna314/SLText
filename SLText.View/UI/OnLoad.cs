@@ -12,7 +12,7 @@ public partial class WindowManager
 {
     private void OnLoad()
     {
-        StartupLog.Write("OnLoad: begin");
+        //StartupLog.Write("OnLoad: begin");
 
         _isLoadingSession = true;
 
@@ -23,12 +23,12 @@ public partial class WindowManager
         // O resolver precisa vir do GLFW: GRGlInterface.Create() sem argumentos usa o loader nativo
         // do Skia, que só reconhece um contexto GLX corrente e retorna null em sessão Wayland, onde
         // o GLFW 3.4 cria contexto EGL. glfwGetProcAddress devolve o ponteiro certo nos dois casos.
-        StartupLog.Write("OnLoad: creating GRGlInterface");
+        //StartupLog.Write("OnLoad: creating GRGlInterface");
         var glContext = _window.GLContext
             ?? throw new InvalidOperationException(
                 "A janela não expõe um contexto OpenGL (GLContext null). A GraphicsAPI precisa ser OpenGL.");
         var glInterface = GRGlInterface.Create(proc => glContext.GetProcAddress(proc));
-        StartupLog.Write("OnLoad: GRGlInterface.Create returned", glInterface == null ? "NULL" : "ok");
+       // StartupLog.Write("OnLoad: GRGlInterface.Create returned", glInterface == null ? "NULL" : "ok");
         if (glInterface == null)
         {
             throw new InvalidOperationException(
@@ -37,7 +37,7 @@ public partial class WindowManager
         }
 
         _grContext = GRContext.CreateGl(glInterface);
-        StartupLog.Write("OnLoad: GRContext.CreateGl returned", _grContext == null ? "NULL" : "ok");
+        //StartupLog.Write("OnLoad: GRContext.CreateGl returned", _grContext == null ? "NULL" : "ok");
         if (_grContext == null)
         {
             throw new InvalidOperationException(
@@ -46,26 +46,27 @@ public partial class WindowManager
         }
 
         SetupSurface();
-        StartupLog.Write("OnLoad: surface ready", _surface == null ? "SURFACE IS NULL" : "ok");
+        //StartupLog.Write("OnLoad: surface ready", _surface == null ? "SURFACE IS NULL" : "ok");
         SetWindowIcon();
-        StartupLog.Write("OnLoad: window icon set");
-        
+        //StartupLog.Write("OnLoad: window icon set");
+
         // Configura Input da Silk.NET
         var input = _window.CreateInput();
-        StartupLog.Write("OnLoad: input created",
-            $"keyboards={input.Keyboards.Count} mice={input.Mice.Count}");
+       // StartupLog.Write("OnLoad: input created",
+        //    $"keyboards={input.Keyboards.Count} mice={input.Mice.Count}");
         _primaryMouse = input.Mice[0];
 
         foreach (var keyboard in input.Keyboards)
         {
             _activeKeyboard = keyboard;
             keyboard.KeyDown += OnKeyDown;
-            
-            keyboard.KeyUp += (k, key, scancode) => {
+
+            keyboard.KeyUp += (k, key, scancode) =>
+            {
                 if (key == _lastPressedKey) _lastPressedKey = null;
             };
-            
-            
+
+
             keyboard.KeyChar += (k, c) =>
             {
                 if (_commandPalette.IsVisible)
@@ -112,9 +113,9 @@ public partial class WindowManager
                 _inputHandler.HandleTextInput(c);
 
                 if (!activeTab.IsDirty) { activeTab.IsDirty = true; UpdateTitle(); }
-                
+
                 RequestDiagnostics();
-                
+
                 if (!IsAnalyzableFile(_currentFilePath)) return;
 
                 if (char.IsLetterOrDigit(c) || c == '.' || c == '_') RequestCompletions();
@@ -142,21 +143,21 @@ public partial class WindowManager
                 {
                     _contextMenu.IsVisible = false;
                 }
-                
+
                 if (_autocomplete.IsVisible && _autocomplete.Bounds.Contains(pos.X, pos.Y))
                 {
-                    bool clickedValidItem = _autocomplete.SelectIndexByMouseY(pos.Y); 
+                    bool clickedValidItem = _autocomplete.SelectIndexByMouseY(pos.Y);
 
                     if (clickedValidItem)
                     {
-                        ApplyAutocomplete(); 
-                        return; 
+                        ApplyAutocomplete();
+                        return;
                     }
                 }
-                
+
                 if (_autocomplete.IsVisible) _autocomplete.IsVisible = false;
                 if (_signatureHelp.IsVisible) _signatureHelp.IsVisible = false;
-                
+
                 float explorerWidth = _explorer.IsVisible ? _explorer.Width : 0;
 
 
@@ -256,7 +257,7 @@ public partial class WindowManager
                 {
                     _contextMenu.OnMouseMove(pos.X, pos.Y);
                 }
-                
+
                 if (_isResizingExplorer)
                 {
                     _explorer.Width = Math.Clamp(pos.X, 100, 500);
@@ -298,8 +299,8 @@ public partial class WindowManager
                         var node = _explorer.GetNodeAt(pos.X, pos.Y);
                         if (node != null)
                         {
-                            _explorer.HandleMouseClick(node); 
-                
+                            _explorer.HandleMouseClick(node);
+
                             if (!node.IsDirectory)
                             {
                                 SetCurrentFile(node.FullPath);
@@ -397,11 +398,14 @@ public partial class WindowManager
                 DwmSetWindowAttribute(handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDarkMode, sizeof(int));
             }
         }
-        
-        if (_settings.Theme == "Light") ApplyTheme(EditorTheme.Light);
-        else ApplyTheme(EditorTheme.Dark);
+
+        var savedTheme = AvailableThemes.FirstOrDefault(t => t.Name == _settings.Theme) ?? EditorTheme.Dark;
+        ApplyTheme(savedTheme);
+        _currentThemeIndex = AvailableThemes.IndexOf(savedTheme);
+        if (_currentThemeIndex == -1) _currentThemeIndex = 0;
+
         ApplySavedFontSize(_settings.FontSize);
-        
+
         if (!string.IsNullOrEmpty(_settings.LastRootDirectory) && Directory.Exists(_settings.LastRootDirectory))
         {
             SetCurrentFile(_settings.LastRootDirectory);
@@ -409,19 +413,19 @@ public partial class WindowManager
 
         if (_settings.OpenTabs != null && _settings.OpenTabs.Count > 0)
         {
-            _tabManager.Tabs.Clear(); 
-            
+            _tabManager.Tabs.Clear();
+
             foreach (var filePath in _settings.OpenTabs)
             {
                 if (File.Exists(filePath))
                 {
-                    try 
+                    try
                     {
                         var content = File.ReadAllText(filePath);
-                
-                        var buf = new TextBuffer(); 
-                        buf.LoadText(content); 
-                
+
+                        var buf = new TextBuffer();
+                        buf.LoadText(content);
+
                         var cur = new CursorManager(buf);
                         _tabManager.AddTab(buf, cur, filePath);
                     }
@@ -431,31 +435,31 @@ public partial class WindowManager
                     }
                 }
             }
-    
+
             if (_tabManager.Tabs.Count > 0)
             {
                 _cursor.SetPosition(0, 0);
                 _tabManager.SelectTab(0);
             }
         }
-        
+
         if (!string.IsNullOrEmpty(_currentFilePath) && File.Exists(_currentFilePath))
         {
             SetCurrentFile(_currentFilePath);
         }
-        
+
         if (_tabManager.Tabs.Count == 0)
         {
             _tabManager.AddTab(_buffer, _cursor, null);
         }
-        
+
         _isLoadingSession = false;
         _cursor.SetPosition(0, 0);
         SyncActiveTab(true);
         _editor.SetScroll(0, 0);
-        
+
         UpdateTitle();
-        StartupLog.Write("OnLoad: complete - event loop should now render frames");
+        //StartupLog.Write("OnLoad: complete - event loop should now render frames");
     }
 
 }

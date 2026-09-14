@@ -1,4 +1,3 @@
-using Microsoft.CodeAnalysis;
 using SLText.Core.Engine;
 using SLText.Core.Engine.LSP;
 

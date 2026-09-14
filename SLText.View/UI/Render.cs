@@ -1,7 +1,5 @@
 using SkiaSharp;
 
-using SLText.View.Services;
-
 namespace SLText.View.UI;
 
 public partial class WindowManager
@@ -15,7 +13,7 @@ public partial class WindowManager
         if (!_firstFrameLogged)
         {
             _firstFrameLogged = true;
-            StartupLog.Write("OnRender: FIRST FRAME rendering", $"window={_window.Size.X}x{_window.Size.Y}");
+            //StartupLog.Write("OnRender: FIRST FRAME rendering", $"window={_window.Size.X}x{_window.Size.Y}");
         }
 
         var canvas = _surface.Canvas;
