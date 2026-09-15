@@ -1,106 +1,279 @@
-# Especificação: Integração GitHub no SLText
+# Especificação: Integração GitHub no SLText — Fases Restantes
 
-> **Última atualização:** 2026-09-14  
-> **Autoridade:** Especificação aprovada após análise arquitetural profunda do codebase.
+> **Última atualização:** 2026-09-14 (Fase 2)
+> **Status atual:** ✅ Fase 2 completa — build passing, branch button na status bar funcional
+> **Arquivo anterior completo:** ver git log para histórico de mudanças
 
-## Visão Geral
+## O que JÁ ESTÁ IMPLEMENTADO
 
-Implementar integração completa com GitHub dentro do editor SLText, permitindo gerenciamento de repositórios, commits, branches, PRs e merge diretamente na UI.
+### Fase 2 — Status Bar Integration (COMPLETA) ✅
+
+| Categoria | Status | Detalhes |
+|-----------|--------|----------|
+| Branch button na StatusBarComponent | ✅ | `BranchButtonBounds`, `_currentBranch`, `SetBranchName()`, `SetGitConnection()` |
+| Visual indicator de conexão | ✅ | Condição `_hasGitConnection` muda cor do texto e play button |
+| Event wiring no WindowManager | ✅ | `ConnectionStateChanged` atualiza `_statusBar` e `_explorer` via `InvokeOnUi()` |
+| Hit-test do botão de branch | ✅ | OnLoad.cs detecta clique em `BranchButtonBounds` → chama `ToggleBranchSelector()` |
+| ToggleBranchSelector (stub) | ✅ | Mostra modal com branch atual até Fase 3 ser implementada |
+| ConnectToRepository | ✅ | Método limpo, verifica `.git` dir, conecta serviço, refresh explorer |
+| RefreshWithGitStatus / ClearGitStatus | ✅ | FileExplorerComponent — stubs funcionais |
+| InvokeOnUi helper | ✅ | Padrão `_pendingAction` para cross-thread marshalling |
+| Auto-connect ao abrir folder | ✅ | Se `_lastDirectory` existe como repo, conecta automaticamente |
+
+**Arquivos modificados na Fase 2:**
+```
+SLText.View/Components/StatusBarComponent.cs    — branch bounds + connection icon
+SLText.View/UI/WindowManager.cs                 — service wiring, event handlers, stubs
+SLText.View/UI/OnLoad.cs                        — branch button click hit-test
+SLText.View/Components/FileExplorerComponent.cs — RefreshWithGitStatus/ClearGitStatus/SetSelectedFile
+```
+
+### Fase 1 — Core Services (COMPLETA) ✅
+
+| Categoria | Status | Detalhes |
+|-----------|--------|----------|
+| Modelos POCO | ✅ 11 arquivos | `GitBranch`, `CommitInfo`, `ChangedFile`, `PullRequestInfo`, `MergeResult`, `RemoteBranch`, `RepositoryInfo`, `CreatePRRequest`, `IssueInfo`, `NotificationInfo`, `GitIntegrationState` |
+| `IGitRepositoryClient` interface | ✅ | Contrato em `SLText.Core/Interfaces/` |
+| `GitHubAuthService` | ✅ | OAuth 2.0 Device Flow com polling |
+| `GitHubTokenStore` | ✅ | AES-256 encryption + file persistence |
+| `GitHubToken` | ✅ | DTO com `DateTimeOffset` expiry |
+| `GitNativeService` | ✅ | Wrapper LibGit2Sharp 0.30 completo (17 métodos) |
+| `GitHubApiService` | ✅ | HTTP client REST v3 (repos, commits, PRs, issues, notifications) |
+| `GitHubJsonContext` | ✅ | DTOs JSON para API responses |
+| `GitHubIntegrationService` | ✅ | Orquestrador unificado (auth + api + git-local) |
+| Dependências NuGet | ✅ | `LibGit2Sharp 0.30.0` no `.csproj` |
+| Testes | ✅ 19 novos testes | Token store round-trip, models POCOs — todos passando |
+
+**Arquivos Core criados na Fase 1:**
+```
+SLText.Core/Engine/Git/
+├── GitHubAuthService.cs        (~200 linhas)
+├── GitHubTokenStore.cs         (~170 linhas)
+├── GitHubToken.cs              (~20 linhas)
+├── GitNativeService.cs         (~550 linhas)
+├── GitHubApiService.cs         (~340 linhas)
+├── GitHubJsonContext.cs        (~410 linhas — DTOs)
+├── MergeMethod.cs              (~15 linhas)
+└── GitHubIntegrationService.cs (~340 linhas)
+
+SLText.Core/Engine/Model/
+├── GitBranch.cs
+├── CommitInfo.cs
+├── ChangedFile.cs
+├── PullRequestInfo.cs
+├── MergeResult.cs
+├── RemoteBranch.cs
+├── RepositoryInfo.cs
+├── CreatePRRequest.cs
+├── IssueInfo.cs
+├── NotificationInfo.cs
+└── GitIntegrationState.cs
+
+SLText.Core/Interfaces/
+└── IGitRepositoryClient.cs
+```
 
 ---
 
-## 1. Arquitetura Confirmada (Analise do Codebase)
+## FASE 2 — Status Bar Integration ✅ COMPLETA
 
-**SlText NÃO usa nenhuma UI framework** — renderização 100% custom via SkiaSharp + Silk.NET (GLFW).
+### 2.1. Branch button na StatusBarComponent ✅
 
-| Camada | Arquivo / Localização | Tecnologia | Responsabilidade |
-|--------|----------------------|------------|------------------|
-| Rendering | `SLText.View/UI/Render.cs` | `SKCanvas`, `SKPaint`, `SKFont` | Pipeline frame-a-frame desenha cada componente em ordem Z |
-| Componentes | `SLText.View/Abstractions/IComponent.cs` | `IComponent` interface | Contrato: `Bounds`, `Render(SKCanvas)`, `Update(double)` |
-| Modais | `SLText.View/Components/ModalComponent.cs` | Não-implementa `IComponent` | Diálogo centralizado com sim/não/cancel, hit-testing próprio |
-| Input Mouse | `SLText.View/UI/Input/MouseHandler.cs` | `MouseButton`, position floats | Roteia clicks baseado em `Bounds.Contains()` |
-| Input Key | `SLText.Core/Engine/InputHandler.cs` | `ICommand` execute/undo | Mapeamento `(ctrl, shift, key)` → `Func<ICommand>` |
-| Serviços View | `SLText.View.Services/` | Singleton pattern | `RunService`, `SettingsService`, `NativeDialogService` |
-| Interfaces Core | `SLText.Core/Interfaces/` | Contratos POCO | `ICommand`, `IDialogService`, `IZoomable` |
-| Commands Core | `SLText.Core/Commands/` | Implementações `ICommand` | `TypingCommand`, `SaveFileCommand`, etc. |
-| Modelos Core | `SLText.Core.Engine.Model/` | POCOs dados | `TabInfo`, `RunConfiguration`, `FileNode` |
-| LSP Service | `SLText.Core.Engine/LSP/LspService.cs` | Microsoft.CodeAnalysis | Pattern referência para async services (lock/gate, events) |
-| Terminal Service | `SLText.Core.Engine/TerminalService.cs` | `System.Diagnostics.Process` | Async process spawn, events OnDataReceived |
+**Arquivo:** `SLText.View/Components/StatusBarComponent.cs`
 
-### Componentes atuais (quem implementa `IComponent`):
-
-| Componente | Implements `IComponent`? | Local | Função |
-|---|---|---|---|
-| EditorComponent | Sim | `Canvas/EditorComponent.cs` | Canvas principal de texto |
-| StatusBarComponent | Sim | `StatusBarComponent.cs` | Barra inferior |
-| TerminalComponent | Sim | `TerminalComponent.cs` | Terminal com tabs |
-| FileExplorerComponent | Sim | `FileExplorerComponent.cs` | Sidebar árvore de arquivos |
-| CommandPaletteComponent | Sim | `CommandPaletteComponent.cs` | Palette Ctrl+Shift+P |
-| ContextMenuComponent | Sim | `ContextMenuComponent.cs` | Menu direito |
-| TabComponent | Sim | `TabComponent.cs` | Tab strip |
-| ModalComponent | **Não** | `ModalComponent.cs` | Overlay centralizado, hit-testing próprio |
-| SearchComponent | **Não** | `SearchComponent.cs` | Find-in-file box |
-| AutocompleteComponent | **Não** | `AutocompleteComponent.cs` | Code completion dropdown |
-| SignatureHelpComponent | **Não** | `SignatureHelpComponent.cs` | Method signature tooltip |
-
-### Padrões essenciais a seguir:
-
-1. **Hit-testing manual por bounds**: Novo botão adiciona campo `SKRect`, check em `WindowManager.OnLoad` via `.Contains(x, y)`. Exemplo: `PlayButtonBounds`, `SelectorBounds`.
-2. **Eventos delegate**: InputHandler exporta `OnXxxRequested += callback` para ações nível alto. Novos inputs mapeados em InputHandler.
-3. **Async pattern (LSP style)**: Usar `_gate = new SemaphoreSlim(1,1)` para thread safety, async-await, eventos `OnStateChanged`, `Task.Run` para ops pesadas.
-4. **Theming-aware**: Todos componentes têm campo `_theme` e método `ApplyTheme(EditorTheme theme)`.
-5. **Non-IComponent overlays**: Popups como Modal/Autocomplete são campos diretos no WindowManager, renderizados manualmente quando `IsVisible=true`.
-6. **Dependência direction**: View → Core. Serviços API podem ir em Core se puros (sem UI), ou View se mantêm estado de UI.
-7. **Zero HttpClient hoje**: Nunca houve chamada HTTP no projeto. Adicionar `System.Net.Http.Json` ao csproj se necessário (embora .NET 10 tenha HttpClient nativo sem pacote).
-
----
-
-## 2. Componentes UI Necessários
-
-### 2.1. Novo item na StatusBar — "GitHub / Branch"
-
-**Arquivo:** `StatusBarComponent.cs` (editar)
-
-Padrão idêntico a `PlayButtonBounds`/`SelectorBounds`: definir nova `SKRect _branchBounds`, desenhar texto + seta no `Render()`.
+Implementado seguindo padrão idêntico a `PlayButtonBounds`/`SelectorBounds`:
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │ 23 L │ C# │ 14pt    [▲ main ▾]   SLText.sln*      Ln 1, Col 1  │
 └──────────────────────────────────────────────────────────────────┘
-         ↑ Hit-test com "_branchBounds.Contains(x,y)" em OnLoad
+         ↑ Hit-test com "BranchButtonBounds.Contains(x,y)" em OnLoad
 ```
 
-**Mudanças em StatusBarComponent.cs:**
-- Campo: `public SKRect BranchBounds { get; private set; }`
-- No Render: desenhar `"▲ <nomeBranch> ▾"` antes do play button
-- `ApplyTheme(EditorTheme)` — usar `_theme` para cores
+**Implementado:**
+- ✅ Campo: `public SKRect BranchButtonBounds { get; private set; }`
+- ✅ No Render: desenha `"▲ <nomeBranch> ▾"` antes do play button
+- ✅ Cores dinâmicas via `_theme.Foreground` ou `_theme.Background.WithAlpha(128)` se desconectado
+- ✅ Setters: `SetBranchName(string? name)` e `SetGitConnection(bool connected)`
+
+### 2.2. Exibir branch atual conectado ao serviço ✅
+
+O `WindowManager` agora:
+1. ✅ Cria instância de `GitHubIntegrationService`
+2. ✅ Wire events depois que `_statusBar` é criado (evita null reference)
+3. ✅ Atualiza status bar via `InvokeOnUi()` quando `ConnectionStateChanged` dispara
+4. ✅ Auto-conecta ao diretório aberto automaticamente
+
+### 2.3. Ícone visual de estado da conexão ✅
+
+```
+Conectado: texto normal com cor do theme
+Desconectado: texto cinza semi-transparente
+Sem repo: botão não renderizado (bounds inativas)
+```
+
+A conexão também desativa o play button visualmente.
+
+### 2.4. Auto-sync do branch na status bar ✅
+
+Quando `ConnectionStateChanged` dispara, WindowManager repassa o branch novo via `InvokeOnUi()`:
+
+```csharp
+_gitHubService.ConnectionStateChanged += (_, state) =>
+{
+    if (_statusBar == null) return;
+    InvokeOnUi(() =>
+    {
+        if (state.HasActiveRepo && !string.IsNullOrEmpty(state.CurrentBranch))
+        {
+            _statusBar.SetBranchName(state.CurrentBranch);
+            _statusBar.SetGitConnection(true);
+            _explorer.RefreshWithGitStatus();
+        }
+        else
+        {
+            _statusBar.SetBranchName(null);
+            _statusBar.SetGitConnection(false);
+            _explorer.ClearGitStatus();
+        }
+    });
+};
+```
+
+### 2.5. Hit-test no mouse click ✅
+
+No `OnLoad.cs`, dentro do handler de `mouse.MouseDown`:
+
+```csharp
+if (_statusBar.BranchButtonBounds.Contains(pos.X, pos.Y) && _statusBar.BranchButtonBounds.Left > 0)
+{
+    ToggleBranchSelector();
+    return;
+}
+```
+
+### 2.6. ToggleBranchSelector (stub para Fase 3) ✅
+
+Método placeholder que abre modal informativo até a Fase 3 ser implementada:
+
+```csharp
+private void ToggleBranchSelector()
+{
+    string? branch = _gitHubService.State.CurrentBranch ?? "(no branch)";
+    _modal.Show("Branch Selector", $"Current branch: {branch}\n\n(Fase 3 — implementar overlay completo)", null, null, null);
+}
+```
+
+---
 
 **Mudanças em WindowManager OnLoad.cs:**
 - Adicionar check de clique: `if (_statusBar.BranchBounds.Contains(pos.X, pos.Y)) { ToggleBranchSelector(); return; }`
 
-### 2.2. BranchSelectorOverlay (não-IComponent, estilo Modal/Autocomplete)
+### 2.2. Exibir branch atual conectado ao serviço
+
+O `WindowManager` precisa:
+1. Criar instância de `GitHubIntegrationService`
+2. Iniciar com `ConnectToRepositoryAsync(lastDirectory)` quando folder aberto
+3. Passar nome do branch para `_statusBar` via evento ou setter direto
+4. Atualizar após cada `SwitchBranchAsync`
+
+### 2.3. Ícone visual de estado da conexão
+
+Dentro do mesmo espaço onde aparece o branch name, adicionar um pequeno indicator:
+- 🔵 conectado (índice azul ou círculo sólido)
+- 🔴 desconectado (círculo vermelho vazio)
+- ⚪ sem repo (sem indicador)
+
+Usar `_theme` colors: ex. `_theme.LineHighlight` para connected, uma cor quente para disconnected.
+
+### 2.4. Auto-sync do branch na status bar
+
+Quando `GitNativeService.StateChanged` dispara, WindowManager deve repassar o branch novo:
+```csharp
+_gitHubService.ConnectionStateChanged += (_, state) =>
+{
+    if (state.CurrentBranch != null)
+        _statusBar.SetBranch(state.CurrentBranch);
+};
+```
+
+---
+
+## FASE 3 — Branch Management Selector Overlay ⏱ ~6-8h
+
+### 3.1. BranchSelectorOverlay (não-IComponent)
 
 **Novo arquivo:** `SLText.View/Components/BranchSelectorOverlay.cs`
 
-Não implementa `IComponent` — é um overlay popup como `AutocompleteComponent` e `ModalComponent`. Segue o padrão existente:
-- Campo `bool IsVisible`
-- Método `Show(SKRect anchorBounds, ...)` para posicionar abaixo do botão na status bar
-- Métodos próprios `RenderButtons()` ou `DrawSelectableList()` usando canvas local
-- Hit-testing interno por posição Y dentro da lista renderizada
+Segue padrão `AutocompleteComponent` / `ModalComponent`: não implementa `IComponent`.
 
-#### Funcionalidades:
+Campos necessários:
+```csharp
+public class BranchSelectorOverlay
+{
+    public bool IsVisible { get; set; }
+    private List<GitBranch> _branches = new();
+    private int _selectedIndex = -1;
+    private double _scrollOffset = 0;
+    private readonly SKFont _font;
+    private readonly SKPaint _bgPaint, _textPaint, _highlightPaint;
+    private EditorTheme _theme = EditorTheme.Dark;
+    
+    // Bounds calculadas pelo Show()
+    private SKRect _overlayRect;
+}
+```
+
+Métodos públicos:
+```csharp
+public void Show(SKRect anchorBounds, GitHubIntegrationService service);
+public void Render(SKCanvas canvas, EditorTheme theme);
+public void HandleClick(float x, float y);
+public void HandleKeyDown(string key);
+public void Clear();
+public void Update(double deltaTime); // para scroll wheel se necessário
+```
+
+### 3.2. Funcionalidades do overlay
+
 - Lista scrollável de branches locais (`main`, `dev`, etc.) e remotos (`origin/main`)
 - Ramas destacadas visualmente (cor diferente para branch atual)
-- Clique seleciona → chama `_gitService.CheckoutBranchAsync(name)`
+- Clique seleciona → chama `_gitService.SwitchBranchAsync(name)`
 - Fecha ao clicar fora ou pressionar Esc
+- Tecla `/` filtra a lista por substring
 
-### 2.3. GitHubPanelOverlay — Painel lateral de GitHub
+### 3.3. Criar novo branch pelo selector
+
+Se houver campo text input no topo do overlay:
+- Usuário digita nome → pressione Enter → chama `_gitService.CreateBranchAsync(sourceBranch, newName)`
+- Source branch default = branch corrente
+
+### 3.4. Sync automático ao mudar branch externamente
+
+Event handler no `WindowManager`:
+```csharp
+_gitHubService.ConnectionStateChanged += async (_, state) =>
+{
+    _branchSelector.Clear();
+    if (state.HasActiveRepo && !string.IsNullOrEmpty(state.CurrentBranch))
+    {
+        var local = await _gitHubService.GetRecentCommitsAsync(1); // trigger refresh
+        // Ou melhor: ter um método GetBranchesListAsync específico
+    }
+};
+```
+
+---
+
+## FASE 4 — Commit Operations Panel ⏱ ~6-8h
+
+### 4.1. GitHubPanelComponent (não-IComponent)
 
 **Novo arquivo:** `SLText.View/Components/GitHubPanelComponent.cs`
 
-Similar a `FileExplorerComponent`: implementa `IComponent` quando persistente, mas como painel tab-based temporário, segue o padrão **não-IComponent overlay** (como CommandPalette). Posiciona-se à esquerda do editor, sobrepondo explorer se visível.
+Painel que fica à esquerda do editor, sobrepondo o Explorer se visível. Segue padrão CommandPalette mas mais largo (400-600px).
 
-#### Abas internas:
+Abas internas:
 | Tab | Conteúdo | Widget |
 |-----|----------|--------|
 | Commits | Lista paginada de commits | Selecionável scroll list |
@@ -108,314 +281,51 @@ Similar a `FileExplorerComponent`: implementa `IComponent` quando persistente, m
 | Changes | staged/unstaged files | Checkable list |
 | Branches | branches rápidos | Selecionável list |
 
-#### Cada item da lista:
-- Linha horizontal com texto truncado + ellipsis
-- Ao clicar: expande detalhes (segunda camada de renderização no mesmo componente)
-- Botões de ação inline (checkout, stage, merge) desenhados como rects clicáveis
-
-### 2.4. CommitDetailOverlay — Visualização expandida de commit
-
-**Novo arquivo:** `SLText.View/Components/CommitDetailOverlay.cs`
-
-Popup que aparece ao clicar num commit (padrão não-IComponent). Mostra diff entre commits, autor, data, SHA completo. Usa layout horizontal com scroll X + scroll Y. Similar ao autocomplete dropdown em estrutura, porém mais rico.
-
-### 2.5. MergeConfirmationDialog
-
-**Novo arquivo:** `SLText.View/Components/MergeConfirmationDialog.cs`
-
-Fusão do padrão `ModalComponent` + informações específicas de merge:
-- Exibe conflicts encontrados (se houver) com trechos de código coloridos
-- Dropdown para merge method (merge/squash/rebase)
-- Botões: Confirm Merge, Cancel, View Conflicts (3 botões como ModalComponent)
-
----
-
-## 3. Camada de Serviço / API
-
-### 3.1. Arquitetura de Serviços — Decisão de Localização
-
-O codebase tem dois padrões para services:
-- **Core**: lógica pura sem dependência de UI (ex: `LspService` tem state de UI mas vive em Core porque usa Microsoft.CodeAnalysis)
-- **View**: serviços que dependem de estado visual (ex: `RunService` gerencia `_activeConfiguration` que está no WindowManager)
-
-Decisão para GitHub:
-
-| Serviço | Local | Motivo |
-|---------|-------|--------|
-| Modelos (`CommitInfo`, `GitBranch`, etc.) | `SLText.Core.Engine.Model/` | POCOs puros, zero UI |
-| `IGitRepositoryClient` interface | `SLText.Core.Interfaces/` | Contrato testável |
-| `GitNativeService` (LibGit2Sharp wrapper) | `SLText.Core.Engine/Git/` | Lógica git = lógica de negócio |
-| `GitHubAuthService` | `SLText.Core.Engine/Git/` | Auth flow = lógica de negócio, sem UI |
-| `GitHubApiService` (REST client) | `SLText.Core.Engine/Git/` | Chamadas HTTP = lógica de negócio |
-| `GitHubIntegrationService` (orchestrator) | `SLText.Core.Engine/Git/` | Coordena auth+api+git-local |
-| Estado UI de GitHub | View-side field no WindowManager | `IsGithubPanelVisible`, current selection state |
-
-### 3.2. GitHubAuthService
-
-**Novo arquivo:** `SLText.Core.Engine/Git/GitHubAuthService.cs`
-
-OAuth 2.0 via Device Flow (sem browser). Padrão async conforme LSP Service pattern.
-
+Cada tab é renderizada via switch dentro do `Render()`:
 ```csharp
-public class GitHubAuthService
-{
-    private readonly SemaphoreSlim _gate = new(1, 1);
-    private const string ClientId = "<registrado-no-github>";
-    private const string TokenUrl = "https://github.com/login/oauth/access_token";
-    private const string DeviceCodeUrl = "https://github.com/login/device/code";
-    
-    public GitHubToken? CurrentToken { get; private set; }
-    public event EventHandler<bool>? AuthStateChanged; // authenticated/disauthenticated
-    
-    public async Task AuthenticateViaDeviceFlowAsync(DeviceFlowCallback callback);
-    public async Task RefreshAccessTokenAsync();
-    public void ClearTokens();
-}
+private enum ActiveTab { Commits, PullRequests, Changes, Branches }
+private ActiveTab _activeTab = ActiveTab.Commits;
 
-public class GitHubToken
-{
-    public string AccessToken { get; set; }
-    public string RefreshToken { get; set; }
-    public DateTime ExpiresAtUtc { get; set; }
-}
-
-// Callback usado pela View para mostrar o device code ao usuário
-public delegate void DeviceFlowCallback(string userCode, Uri verificationUri);
+private void RenderCommits(SKCanvas canvas, float y, float width) { ... }
+private void RenderPullRequests(SKCanvas canvas, float y, float width) { ... }
+private void RenderChanges(SKCanvas canvas, float y, float width) { ... }
+private void RenderBranches(SKCanvas canvas, float y, float width) { ... }
 ```
 
-**Fluxo completo:**
-1. `AuthenticateViaDeviceFlowAsync()` chama POST `/login/oauth/device/code`
-2. Recebe `device_code`, `user_code` (8 chars), `verification_uri`
-3. Emite evento `AuthStateChanged(false)` e dispara callback com dados para View exibir
-4. View mostra modal/popup: "Enter code: AB12 CD34 at https://github.com/login/device"
-5. App faz polling POST `/login/oauth/access_token` a cada 5 segundos
-6. GitHub responde com token ou "authorization_pending"
-7. Ao sucesso: armazena, emite `AuthStateChanged(true)`
+### 4.2. Tab Commits — renderizar lista paginada
 
-**Armazenamento seguro de tokens** (cross-platform):
-- Linux: usar `libsecret` via NuGet `SecretStorage` (GNOME Keyring / KDE Wallet)
-- Fallback: arquivo criptografado AES-256 em `~/.config/sltext/github-tokens.enc`
-- Chave derivada de máquina única (usar `MachineKey` do .NET)
+Para cada commit:
+- SHA curto (7 chars) em monospace com cor diferente
+- Message principal em texto normal
+- Author name em itálico/cor secundária
+- Relative time ("2 days ago") à direita
 
-### 3.3. GitNativeService
+Ao clicar numa linha: expande detalhes (diff entre commits, author email, parent SHAs).
 
-**Novo arquivo:** `SLText.Core.Engine/Git/GitNativeService.cs`
+### 4.3. Expandir detalhes do commit
 
-Wrapper sobre **LibGit2Sharp** seguindo padrão `LspService._gate` para thread safety.
+A linha clicada muda de renderização: ocupa mais altura mostrando:
+- Mensagem completa (full message/body)
+- Autor email
+- Parent SHAs
+- Arquivos modificados nesta commit
 
+### 4.4. Cherry-pick e revert via modal de confirmação
+
+Botões inline em cada commit expandido:
+- "Cherry-pick" → abre pequeno dialog confirmando
+- "Revert" → abre pequeno dialog confirmando
+
+Estes dialogs reutilizam o pattern de `ModalComponent` mas customizado.
+
+### 4.5. Refresh após commit/fetch
+
+Quando `RepositorySynced` event dispara:
 ```csharp
-public class GitNativeService : IDisposable
-{
-    private readonly SemaphoreSlim _gate = new(1, 1);
-    private Repository? _repo;
-    private readonly string _repositoryPath;
-    
-    // Estado público reativo
-    public string? CurrentBranchName { get; private set; }
-    public bool HasUncommittedChanges { get; private set; }
-    public int LocalAheadCount { get; private set; }
-    public int LocalBehindCount { get; private set; }
-    public List<string> UntrackedFiles { get; private set; } = new();
-    
-    public event EventHandler<GitStateChangedArgs>? StateChanged;
-    
-    public void OpenRepository(string path);
-    public Task<List<GITBranch>> ListLocalBranchesAsync();
-    public Task<List<RemoteBranch>> ListRemoteBranchesAsync(string remote = "origin");
-    public Task SwitchBranchAsync(string branchName);
-    public Task CreateBranchAsync(string sourceBranch, string newBranchName);
-    public Task PushAsync(string branchName, bool force = false);
-    public Task FetchAsync();
-    public Task<PullResult> PullAsync();
-    public Task CommitAsync(string message, IEnumerable<string>? files = null);
-    public Task CherryPickAsync(string sourceSha);
-    public Task RevertAsync(string sha);
-    public Task<List<ChangedFile>> GetStatusAsync();
-    public Task StageFileAsync(string filePath);
-    public Task StageAllAsync();
-}
+_gitHubService.RepositorySynced += () => _gitHubPanel.RefreshCurrentTab();
 ```
 
-**Métodos auxiliares de conveniência:**
-```csharp
-public async Task<List<CommitInfo>> GetLogAsync(int count = 50, string branch = "HEAD")
-{
-    await _gate.WaitAsync();
-    try {
-        var logs = _repo?.Head.Tip.Children.Take(count);
-        // Mapear para CommitInfo DTOs
-    } finally { _gate.Release(); }
-}
-```
-
-### 3.4. GitHubApiService
-
-**Novo arquivo:** `SLText.Core.Engine/Git/GitHubApiService.cs`
-
-HTTP REST client para API do GitHub (v4 GraphQL opcional depois). Seguir padrão `LspService` com `HttpClient` shared instance, `_gate`, eventos de progresso.
-
-```csharp
-public class GitHubApiService
-{
-    private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly HttpClient _httpClient;
-    private readonly GitHubAuthService _auth;
-    
-    public event EventHandler<ApiResponseEventArgs>? ApiResponseReceived;
-    
-    public GitHubApiService(GitHubAuthService authService, HttpClient httpClient) { ... }
-    
-    // Repositórios
-    public Task<RepositoryInfo> GetRepositoryInfoAsync();
-    public Task<List<RemoteBranch>> GetRemoteBranchesAsync();
-    
-    // Commits via API (complemento ao git-local)
-    public Task<List<CommitInfo>> GetRemoteLogAsync(int page = 1, int perPage = 30);
-    public Task<CommitInfo?> GetCommitAsync(string sha);
-    
-    // Pull Requests
-    public Task<List<PullRequestInfo>> ListOpenPullRequestsAsync();
-    public Task<PullRequestInfo> CreatePullRequestAsync(CreatePRRequest request);
-    public Task<MergeResult> MergePullRequestAsync(int prNumber, MergeMethod method);
-    public Task<PullRequestInfo?> GetPullRequestAsync(int number);
-    
-    // Issues (futuro)
-    public Task<List<IssueInfo>> ListIssuesAsync(IssueState state = IssueState.Open);
-    
-    // Notifications
-    public Task<List<NotificationInfo>> GetNotificationsAsync();
-}
-```
-
-**MergeMethod enum:**
-```csharp
-public enum MergeMethod { Merge, Squash, Rebase }
-```
-
-### 3.5. GitHubIntegrationService (Orquestrador)
-
-**Novo arquivo:** `SLText.Core.Engine/Git/GitHubIntegrationService.cs`
-
-Única classe pública que a View consulta. Soma os três subservices.
-
-```csharp
-public class GitHubIntegrationService
-{
-    private readonly GitHubAuthService _auth;
-    private readonly GitHubApiService _api;
-    private readonly GitNativeService _git;
-    
-    public GitHubIntegrationState State { get; private set; }
-    
-    public event EventHandler<GitHubIntegrationState>? ConnectionStateChanged;
-    public event EventHandler<RepositorySyncEventArgs>? RepositorySynced;
-    
-    public async Task ConnectToRepositoryAsync(string repositoryPath);
-    public async Task AuthenticateAsync();
-    public async Task DisconnectAsync();
-    public async Task<List<CommitInfo>> GetRecentCommitsAsync(int count = 50);
-    public Task SwitchBranchAsync(string branchName);
-    public Task PushAsync();
-    public Task PullAsync();
-    public Task<List<ChangedFile>> GetPendingChangesAsync();
-    public Task<List<PullRequestInfo>> GetOpenPullRequestsAsync();
-    public Task<MergeResult> MergeBranchAsync(string sourceBranch, string targetBranch, MergeMethod method);
-    public Task<PullRequestInfo> CreatePullRequestAsync(string title, string body, string head, string baseBranch);
-    public Task CherryPickAsync(string sha, string targetBranch);
-}
-```
-
-### 3.6. GitHubTokenStore (Persistência)
-
-**Novo arquivo:** `SLText.Core.Engine/Git/GitHubTokenStore.cs`
-
-Interface mínima para persistir tokens. Implementação concreta pode alternar entre keyring e file-based dependendo do platform.
-
-```csharp
-public static class GitHubTokenStore
-{
-    public static async Task SaveAsync(GitHubToken token);
-    public static Task<GitHubToken?> LoadAsync();
-    public static void Clear();
-}
-```
-
----
-
-## 4. Modelos de Dados
-
-**Novos arquivos em `SLText.Core.Engine.Model/`:**
-
-```
-SLText.Core.Engine.Model/
-├── GitBranch.cs          (Name, IsLocal, RemoteName?, IsCurrent, UpstreamBranch?)
-├── CommitInfo.cs         (Sha, ShortSha, Message, AuthorName, AuthorEmail, CommittedAt, TreeId)
-├── ChangedFile.cs        (Path, Status: Added|Modified|Deleted|Rename|Unmerged, Staged: bool)
-├── PullRequestInfo.cs    (Number, Title, Body?, State: Open|Closed, HeadBranch, BaseBranch, AuthorLogin, CreatedAt, MergedAt, FilesChanged, Additions, Deletions)
-├── MergeResult.cs        (Success: bool, FastForward: bool, ConflictPaths: string[], ErrorMessage?)
-├── RemoteBranch.cs       (Name, Url, IsTrackingLocal: bool, LocalBranchName?)
-├── RepositoryInfo.cs     (FullName, Description, DefaultBranch, IsPrivate, PushUrl, CloneUrl)
-├── CreatePRRequest.cs    (Title, Body, Head, Base, Draft: bool)
-├── IssueInfo.cs          (Number, Title, State, AuthorLogin, Labels[], CreatedAt)
-├── NotificationInfo.cs   (Id, Reason, Unread: bool, RepositoryName, SubjectType, SubjectTitle)
-└── GitIntegrationState.cs (IsAuthenticated: bool, HasActiveRepo: bool, RepoPath, CurrentBranch, HasPendingPush, HasPendingPull)
-```
-
-### Padrão POCO — exemplo mínimo (`CommitInfo.cs`):
-
-```csharp
-namespace SLText.Core.Engine.Model;
-
-public class CommitInfo
-{
-    public string Sha { get; set; } = "";
-    public string ShortSha => Sha[..7];
-    public string Message { get; set; } = "";
-    public string AuthorName { get; set; } = "";
-    public string AuthorEmail { get; set; } = "";
-    public DateTime CommittedAt { get; set; }
-    public string? TreeId { get; set; }
-}
-```
-
----
-
-## 5. Integração com WindowManager & InputHandler
-
-### 5.1. Novo campo no WindowManager.cs
-
-```csharp
-// Serviços Core
-private GitHubIntegrationService _gitHubService = new();
-
-// Componentes UI overlays (não-IComponent)
-private BranchSelectorOverlay _branchSelector = new();
-private GitHubPanelComponent _gitHubPanel = new();
-private MergeConfirmationDialog _mergeDialog = new();
-```
-
-### 5.2. Mudanças em OnLoad.cs — Mouse hits extras
-
-```csharp
-// Dentro do mouse.MouseDown callback existente, após os checks existentes de status bar:
-
-if (_statusBar.BranchBounds.Contains(pos.X, pos.Y))
-{
-    // Toggle branch selector dropdown abaixo do botão
-    _branchSelector.Show(_statusBar.BranchBounds);
-    return;
-}
-
-if (_gitHubPanel.Bounds.Contains(pos.X, pos.Y))
-{
-    _gitHubPanel.HandleClick(pos.X, pos.Y);
-    return;
-}
-```
-
-### 5.3. Mudanças em OnLoad.cs — Teclado extra
-
-Mapear novos shortcuts no handler `keyboard.KeyDown` (dentro do loop existing de key events):
+### 4.6. Abrir/fechar painel via teclado
 
 | Combinação | Ação | Handler |
 |-----------|------|---------|
@@ -423,302 +333,185 @@ Mapear novos shortcuts no handler `keyboard.KeyDown` (dentro do loop existing de
 | `Ctrl+Shift+B` | Abrir branch selector | `_branchSelector.Show(...)` |
 | `Ctrl+Shift+C` | Focar tab Commits no panel | `_gitHubPanel.ActiveTab = 0; IsVisible=true` |
 
-### 5.4. Mudanças em Render.cs
+---
 
-Na render loop (`OnRender`), após renders existentes de componentes:
+## FASE 5 — Advanced Panel Features ⏱ ~8-10h
 
-```csharp
-// GitHub overlays (não-IComponent) — renderizar se visíveis
-if (_branchSelector.IsVisible)
-    _branchSelector.Render(canvas, _currentTheme);
+### 5.1. Tab Pull Requests
 
-if (_gitHubPanel.IsVisible)
-    _gitHubPanel.Render(canvas, _currentTheme);
+Listar PRs abertos do repo ativo via `_gitHubService.GetOpenPullRequestsAsync()`.
 
-if (_mergeDialog.IsVisible)
-    _mergeDialog.Render(canvas, new SKRect(0, 0, width, height), _currentTheme);
+Formato por item:
+- Número (#) + título
+- Estado colorido (verde=open, vermelho=closed)
+- Autor login
+
+Ao clicar: expande corpo do PR, base/head refs, status de CI (se API tiver).
+
+### 5.2. Tab Changes — staged/unstaged files
+
+Chamar `_gitHubService.GetPendingChangesAsync()` para obter lista de `ChangedFile`.
+
+Renderização:
+```
+[✓] Main.cs                Modified     ← checkbox + path + status letter
+[ ] Program.cs             Added
+[M] styles.css             Untracked
 ```
 
-### 5.5. InputHandler — Novos eventos delegate
+Checkbox desenhado como rect vazio/preenchido. Click alterna `Staged`.
 
-**Arquivo:** `SLText.Core/Engine/InputHandler.cs` (editar)
+### 5.3. Stage individual file via botão inline
 
-Adicionar novos events públicos e mapeamentos nos dicts de shortcuts:
+Cada linha de change tem um botão "+ Stage" (rect desenhado) na extremidade direita. Click chama `_gitHubService.StageFileAsync(filePath)`.
 
-```csharp
-// Novos events públicos
-public event Action? OnOpenGitHubPanelRequested;
-public event Action<string>? OnCheckoutBranchRequested;
-public event Action? OnPushCommitsRequested;
-public event Action? OnFetchUpdatesRequested;
+### 5.4. Visual diff básico em CommitDetailOverlay
 
-// No constructor, dentro dos dicts _undoableShortcuts/_immediateShortcuts:
-("Ctrl+Shift+G", () => OnOpenGitHubPanelRequested?.Invoke());
-("Ctrl+Shift+B", () => OnCheckoutBranchRequested?.Invoke(""));
-("Ctrl+Shift+F", () => OnFetchUpdatesRequested?.Invoke());
+Quando commit expandido mostra arquivos modificados, cada arquivo tem link "View Diff". Abre overlay com diff truncated por linha:
+
+Formato:
+```
+@@ -10,7 +10,8 @@
+-    Console.WriteLine("hello");
++    Console.WriteLine("world");
++    Console.WriteLine("updated!");
 ```
 
-### 5.6. WindowManager subscribe em OnLoad
+Linhas removidas: cor vermelha. Linhas adicionadas: cor verde. Fundo neutro para unchanged.
 
+### 5.5. Notificações banner
+
+No canto superior direito do editor:
+- Rate limit banner: "Rate limit exceeded. Try again in X minutes" (vermelho)
+- Auth expired: "Authentication expired. Please re-authenticate." (laranja)
+- Sync success: "Pushed 3 commits." (verde, auto-hide 3s)
+
+---
+
+## FASE 6 — Merge & PR Workflow ⏱ ~6-8h
+
+### 6.1. MergeConfirmationDialog
+
+**Novo arquivo:** `SLText.View/Components/MergeConfirmationDialog.cs`
+
+Modal tipo `ModalComponent` com campos extras:
+- Dropdown para merge method (merge/squash/rebase)
+- Botões: Confirm Merge, Cancel, View Conflicts (3 botões)
+
+### 6.2. Fluxo fast-forward vs merge-commit detection
+
+Antes de confirmar merge, verificar se pode ser fast-forward:
 ```csharp
-_inputHandler.OnOpenGitHubPanelRequested += () =>
+// Se ahead == 0 e behind == 0 → fast-forward simples
+// Se ahead > 0 e behind == 0 → push basta
+// Se ahead > 0 e behind > 0 → fetch primeiro, depois merge
+```
+
+### 6.3. Listar conflicts encontrados
+
+Se merge falhar, ler o output do GitNativeService:
+```csharp
+var result = await _gitHubService.MergeBranchAsync(source, target, method);
+if (!result.Success && result.ConflictPaths.Any())
 {
-    _gitHubPanel.IsVisible = !_gitHubPanel.IsVisible;
-};
+    // Mostrar conflicts no UI
+}
+```
 
-_inputHandler.OnPushCommitsRequested += async () =>
-{
-    if (_gitHubService.State.IsAuthenticated && _gitHubService.State.HasActiveRepo)
-    {
-        await _gitHubService.PushAsync();
-        _gitHubPanel.RefreshCurrentTab();
-    }
-};
+### 6.4. Dropdown merge method
+
+Desenhar dropdown no overlay do dialog:
+```
+╔══════════════════════╗
+║ Merge      ▼         ║
+╠══════════════════════╣
+║ Merge                ║
+║ Squash               ║
+║ Rebase               ║
+╚══════════════════════╝
+```
+
+### 6.5. Criar PR via modal
+
+Prompt fields: title, body, draft toggle, head branch, base branch.
+
+Simples: usar os textos existentes na status bar/current branch.
+
+### 6.6. Merge PR via API GitHub
+
+Endpoint: `PUT /repos/{owner}/{repo}/pulls/{number}/merge`
+
+```csharp
+var mergeResult = await _gitHubService.MergePullRequestAsync(prNumber, MergeMethod.Squash);
 ```
 
 ---
 
-## 6. Sequência de Implementação (Fases)
+## FASE 7 — Polimento ⏱ ~4-6h
 
-### Fase 1 — Fundação (Core services + models) ⏱ ~8-12h
-- [ ] **1.1** Criar todos os modelos POCO em `SLText.Core.Engine.Model/`
-- [ ] **1.2** Adicionar NuGet package `LibGit2Sharp` ao `SLText.Core.csproj`
-- [ ] **1.3** Verificar libgit2 native libraries no ambiente dev Linux: `ldconfig -p \| grep libgit2`
-- [ ] **1.4** Implementar `GitNativeService` com LibGit2Sharp — abrir repo, listar branches, commits, status
-- [ ] **1.5** Registrar GitHub OAuth App nas settings do GitHub (https://github.com/settings/developers)
-- [ ] **1.6** Implementar `GitHubAuthService` — Device Flow completo com polling
-- [ ] **1.7** Implementar `GitHubTokenStore` — encrypted file storage fallback
-- [ ] **1.8** Implementar `GitHubApiService` — endpoints REST básicos (repo info, remote log, PRs)
-- [ ] **1.9** Implementar `GitHubIntegrationService` orchestrator
+### 7.1. Theming completo
 
-### Fase 2 — Status Bar Integration ⏱ ~4-6h
-- [ ] **2.1** Adicionar `_branchBounds` + texto na `StatusBarComponent.Render()`
-- [ ] **2.2** Hit-test no `WindowManager.OnLoad` para botão branch
-- [ ] **2.3** Exibir branch atual via `_gitHubService.GetCurrentBranch()`
-- [ ] **2.4** Atualizar barra após checkout/switch branch
-- [ ] **2.5** Ícone visual de estado da conexão (connected/disconnected)
+Garantir que TODOS os novos componentes usam `_theme`:
+- Backgrounds, foregrounds, highlight colors
+- Status bar colors devem bater com o tema atual
+- Cores de diff (red/green for remove/add) devem ser derivadas do theme
 
-### Fase 3 — Branch Management ⏱ ~6-8h
-- [ ] **3.1** Implementar `BranchSelectorOverlay` — lista scrollável, hit-testing interno
-- [ ] **3.2** Listar branches locais e remotos via `_gitService.GetBranchesAsync()`
-- [ ] **3.3** Checkout ao clicar — chama `_gitService.SwitchBranchAsync(name)`
-- [ ] **3.4** Criar novo branch direto pelo selector
-- [ ] **3.5** Sync automático quando git reporta mudança de branch externamente
+### 7.2. Estado sincronizado via events
 
-### Fase 4 — Commit Operations ⏱ ~6-8h
-- [ ] **4.1** Implementar `GitHubPanelComponent` — estrutura com abas, layout geral
-- [ ] **4.2** Tab Commits: renderizar lista paginada de commits
-- [ ] **4.3** Exibir SHA curto, mensagem, autor, data relativa
-- [ ] **4.4** Expandir detalhes ao clicar (abre `CommitDetailOverlay`)
-- [ ] **4.5** Cherry-pick e revert via modal de confirmação
-- [ ] **4.6** Refresh automático após commit ou fetch
+Todos os eventos `GitNativeService.StateChanged` → atualizar UI:
+- Branch name na status bar
+- Count pending push/pull na sidebar
+- Colors de conexão mudam dinamicamente
 
-### Fase 5 — Advanced Panel Features ⏱ ~8-10h
-- [ ] **5.1** Tab Pull Requests: listar PRs abertos
-- [ ] **5.2** Tab Changes: staged/unstaged files com checkbox visual
-- [ ] **5.3** Stage individual file via botão inline
-- [ ] **5.4** Visual diff básico em `CommitDetailOverlay` (truncado por linha)
-- [ ] **5.5** Notificações banner (rate limit, auth expired, sync errors)
+### 7.3. Tratamento erros UX
 
-### Fase 6 — Merge & PR Workflow ⏱ ~6-8h
-- [ ] **6.1** Implementar `MergeConfirmationDialog`
-- [ ] **6.2** Fluxo fast-forward vs merge-commit detection
-- [ ] **6.3** Listar conflicts encontrados (paths + diff snippet)
-- [ ] **6.4** Dropdown merge method (merge/squash/rebase)
-- [ ] **6.5** Criar PR via modal com campos title/body/draft
-- [ ] **6.6** Merge PR via API GitHub (REST POST /pulls/{number}/merge)
+- Rate limit banner: extrair header `X-RateLimit-Reset` do response
+- Offline state: mostrar ícone "no connection" no status bar
+- Token refresh UI: popup pedindo re-autenticação quando token expire
 
-### Fase 7 — Polimento ⏱ ~4-6h
-- [ ] **7.1** Theming completo em todos componentes novos
-- [ ] **7.2** Estado sincronizado via events de GitNativeService.StateChanged
-- [ ] **7.3** Tratamento erros UX — rate limit banner, offline state, token refresh UI
-- [ ] **7.4** Sync de estado periódico (file watcher ou poll a cada 30s)
-- [ ] **7.5** Documentação README atualizada com fluxo de setup GitHub Auth
-- [ ] **7.6** Testes unitários nos serviços Core (mock HttpClient/LibGit2Sharp)
+### 7.4. Sync periódico opcional
+
+Poll a cada 30 segundos verificando:
+- `FetchAsync()` silencioso
+- Atualizar counts ahead/behind
+- Só notificar usuário se realmente mudou algo
+
+### 7.5. Documentação README atualizada
+
+Adicionar seção no README explicando:
+- Como registrar GitHub OAuth App
+- Configuração inicial do token
+- Shortcuts disponíveis
+- Troubleshooting comum
+
+### 7.6. Mais testes unitários nos serviços Core
+
+Mock HttpClient/LibGit2Sharp para testar:
+- `GitHubApiService` respostas corretas
+- `GitNativeService` em repos simulados
+- Edge cases (auth errors, network timeouts)
 
 ---
 
-## 7. Dependências Necessárias
+## Checklist Rápido — Resumo das Fases Restantes
 
-### NuGet Packages:
-```xml
-<!-- SLText.Core.csproj -->
-<PackageReference Include="LibGit2Sharp" Version="0.30.0" />
-<!-- Opcional: Para keyring integration (Linux/macOS credential store) -->
-<PackageReference Include="SecretStorage" Version="3.0.0" 
-    Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
-```
+| Fase | Título | Est. | Prioridade | Status |
+|------|--------|------|------------|--------|
+| ~~**2**~~ | ~~Status Bar Integration~~ | 4-6h | ~~🔴 Alta~~ | ✅ COMPLETA |
+| **3** | Branch Selector Overlay | 6-8h | 🔴 Alta (funcionalidade central) | ⏭ Próxima |
+| **4** | Commit Operations Panel | 6-8h | 🟡 Média (visualização rica) | 📋 Em fila |
+| **5** | Advanced Panel Features | 8-10h | 🟡 Média (PRs, changes, diffs) | 📋 Em fila |
+| **6** | Merge & PR Workflow | 6-8h | 🟢 Baixa (operação avançada) | 📋 Em fila |
+| **7** | Polimento | 4-6h | 🟢 Baixa (qualidade final) | 📋 Em fila |
 
-### GitHub OAuth Registration:
-Registrar uma GitHub App ou OAuth App em:
-https://github.com/settings/developers
-
-Configurações mínimas:
-- **Application type**: Native app
-- **Authorization callback URL**: `http://localhost:9876/callback` (fallback se polling falhar)
-- **Scopes**: `repo`, `read:org`
-- **Permissões**: Repository → Contents: Read and write, Pull requests: Read and write
-
-### Credential Storage (cross-platform):
-| Platform | Mechanism | Priority |
-|----------|-----------|----------|
-| Windows | Windows Credential Manager (via SecretStorage) | First choice |
-| macOS | macOS Keychain (via SecretStorage) | First choice |
-| Linux | GNOME Secret Service / KDE Wallet (via SecretStorage) | First choice |
-| Fallback | Arquivo criptografado AES-256 em `~/.config/sltext/github-tokens.enc` | Always available |
-
-Chave de descriptografia derivada de máquina única usando .NET `CryptographicProvider` + user profile hash.
+**Total estimado restante:** 30-40h (Fases 3–7)
 
 ---
 
-## 8. Considerações Técnicas
+## Próximos Passos Recomendados
 
-### Performance:
-- Operações Git devem ser sempre **assíncronas** (Task.Run / async-await) seguindo padrão LSP Service
-- Commits list deve usar **paginação lazy** (carregar 50, scroll carrega mais)
-- Polling notificações: max **1x/min** para evitar rate limit
-
-### Rate Limits (GitHub API v3 REST):
-- **Authenticated (token)**: 5,000 requests/hour
-- **Unauthenticated**: 60 requests/hour
-- Se atingir rate limit: mostrar banner vermelho "Rate limit exceeded. Try again in X minutes"
-- Respeitar headers `X-RateLimit-Remaining` e `X-RateLimit-Reset` em todas respostas HTTP
-
-### Segurança:
-- Tokens NUNCA aparecem em logs/console
-- Tokens encriptados em storage (AES-256 como fallback)
-- Limpar token na logout/clear cache via `GitHubTokenStore.Clear()`
-- Não enviar tokens em error stack traces (strip de sensitive data)
-- User code no Device Flow: exibir em monospace maiúsculo para facilitar cópia
-
-### Thread safety:
-- Todos serviços usam `_gate = new SemaphoreSlim(1, 1)` exatamente como `LspService`
-- Callbacks de UI disparados via SynchronizationContext ou verificação de thread
-- Dispor corretamente recursos (`IDisposable`, `_gate.Dispose()`)
-
-### Testabilidade:
-- Interfaces em `SLText.Core.Interfaces.IGitRepositoryClient` para mockability
-- `GitNativeService` pode ter implementação fake `FakeGitService` para testes unitários
-- `GitHubApiService` injeta `HttpClient` para poder substituir por `HttpMessageHandler` fake
-
----
-
-## 9. Diagrama de Componentes (Resumo)
-
-```
-WindowManager (central orchestrator)
-│
-├── StatusBarComponent : IComponent
-│   ├── PlayButtonBounds (existing)
-│   ├── SelectorBounds (existing)
-│   └── BranchBounds (NEW)
-│       └── Click → Toggle BranchSelectorOverlay
-│
-├── ModalComponent (existing)
-│   └── Used for simple confirmations only
-│
-├── BranchSelectorOverlay (NEW — non-IComponent)
-│   ├── bool IsVisible
-│   ├── Render(SKCanvas canvas, EditorTheme theme)
-│   ├── HandleClick(float x, float y)
-│   └── DrawSelectableList(branch items)
-│
-├── GitHubPanelComponent (NEW — non-IComponent overlay)
-│   ├── bool IsVisible
-│   ├── ActiveTab: int
-│   ├── Bounds: SKRect
-│   ├── Sub-tabs: Commits | PRs | Changes | Branches
-│   └── Each tab has its own item list renderer
-│
-├── CommitDetailOverlay (NEW — non-IComponent popup)
-│   ├── Shows when clicking a commit in panel
-│   ├── Diff viewer between commits
-│   └── Scroll X + Y support
-│
-├── MergeConfirmationDialog (NEW — non-IComponent)
-│   ├── Conflict display area
-│   ├── Merge method dropdown
-│   └── 3-button layout (Confirm / Cancel / View Conflicts)
-│
-└── CommandPaletteComponent (existing — can be extended)
-    └── Can host GitHub commands like "Create PR", "Switch Branch"
-
-Core Services (SLText.Core.Engine.Git/)
-├── GitHubIntegrationService (orchestrator — main entry point)
-│   ├── GitHubAuthService → OAuth 2.0 Device Flow
-│   │   └── Emits DeviceFlowCallback(string userCode, Uri verificationUri)
-│   ├── GitHubApiService → REST calls (HttpClient)
-│   │   └── Protected by _gate semaphore
-│   ├── GitNativeService → LibGit2Sharp wrapper
-│   │   └── Protected by _gate semaphore
-│   └── GitHubTokenStore → Encrypted persistence
-│
-Data Models (SLText.Core.Engine.Model/)
-├── GitBranch, CommitInfo, ChangedFile, PullRequestInfo
-├── MergeResult, RemoteBranch, RepositoryInfo
-├── CreatePRRequest, IssueInfo, NotificationInfo
-└── GitIntegrationState
-```
-
----
-
-## 10. Checklist de Pré-Requisitos
-
-Antes de começar a implementaçao:
-
-- [ ] Criar/register GitHub OAuth App em https://github.com/settings/developers
-- [ ] Anotar `CLIENT_ID` e `CLIENT_SECRET` (se necessário para refresh)
-- [ ] Instalar `LibGit2Sharp` NuGet package no `SLText.Core.csproj`
-- [ ] Verificar libgit2 native libraries no ambiente Linux: `ldconfig -p | grep libgit2`
-- [ ] Definir política de storage de credenciais (keyring via SecretStorage vs encrypted file)
-- [ ] Escolher porta para callback HTTP fallback (`localhost:9876` recomendado)
-- [ ] Configurar scopes mínimos: `repo`, `read:org`
-
----
-
-## 11. Arquitetura de Dados Fluindo
-
-```
-[User clicks "main" in status bar branch button]
-    ↓
-WindowManager.OnLoad mouse handler detects click on _statusBar.BranchBounds
-    ↓
-BranchSelectorOverlay.Show() appears with local + remote branches
-    ↓
-User clicks "dev" → WindowManager calls _gitHubService.SwitchBranchAsync("dev")
-    ↓
-GitHubIntegrationService → GitNativeService.SwitchBranchAsync("dev")
-    ↓
-LibGit2Sharp Repository.Head.Fetch() switches ref
-    ↓
-State notification flows back: _gitHubService.OnStateChanged → branch name updated
-    ↓
-StatusBarComponent gets new branch name → re-renders with "▲ dev ▾"
-    ↓
-Next frame: OnRender redraws status bar with updated text
-```
-
----
-
-## Notas Finais
-
-### Escopo mínimo viável (MVP):
-1. Conexão + branch display na status bar
-2. Troca de branch via selector overlay
-3. Fetch/push básico
-4. Visualização de commits recentes no panel
-
-### Feature parciais descartáveis (prioridade baixa):
-- Cherry-pick via UI
-- Inline diff viewer de conflicts
-- GraphQL queries complexas
-- Issue management
-
-### Sugestão de ordem de trabalho:
-Começar pela **Fase 1 → Fase 2** para ter algo funcional rapidamente (ver branch na status bar, trocar branch). Depois evoluir para commits e PRs incrementalmente. Cada fase autônoma entregando um slice visível.
-
-### Riscos técnicos identificados:
-- **Wayland + OpenGL**: Se SkiaSharp não criar GRContext no Wayland, nenhuma UI funciona (já documentado no código existente)
-- **Rate limit GitHub API**: 5k req/h é generoso mas polls frequentes podem atingir — usar ETag caching e verificar X-RateLimit-Remaining
-- **Credential storage no Linux headless**: Sem session D-Bus, SecretStorage falha — fallback encrypted file obrigatório
-- **LibGit2Sharp native deps**: Em distribuições minimalistas, libssl/libcurl ausentes — package manager must-have
+Começar pela **Fase 3** — Branch Selector Overlay, que dá vida ao botão de branch na status bar:
+1. Criar `BranchSelectorOverlay.cs` seguindo padrão `AutocompleteComponent` / `ModalComponent`
+2. Lista scrollável com branches locais e remotos
+3. Clique seleciona → chama `_gitHubService.SwitchBranchAsync(name)`
+4. Campo de texto para criar novo branch
