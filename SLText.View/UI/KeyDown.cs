@@ -8,6 +8,16 @@ public partial class WindowManager
 {
     private void OnKeyDown(IKeyboard k, Key key, int arg3)
     {
+        // --- Branch selector overlay takes highest priority when visible (Fase 3) ---
+        if (_branchSelector.IsVisible)
+        {
+            string mappedKey = KeyboardMapper.Normalize(key);
+            bool ctrl = k.IsKeyPressed(Key.ControlLeft) || k.IsKeyPressed(Key.ControlRight);
+            bool shift = k.IsKeyPressed(Key.ShiftLeft) || k.IsKeyPressed(Key.ShiftRight);
+
+            if (_branchSelector.HandleKeyDown(mappedKey, ctrl, shift)) return;
+        }
+
         if (_explorer.IsFocused && _explorer.IsVisible)
         {
             if (key == Key.Up) { _explorer.HandleKeyDown("Up"); return; }
@@ -41,16 +51,6 @@ public partial class WindowManager
             {
                 _autocomplete.IsVisible = false;
             }
-        }
-
-        // --- Branch selector overlay (Fase 3) ---
-        if (_branchSelector.IsVisible)
-        {
-            string mappedKey = KeyboardMapper.Normalize(key);
-            bool ctrl = k.IsKeyPressed(Key.ControlLeft) || k.IsKeyPressed(Key.ControlRight);
-            bool shift = k.IsKeyPressed(Key.ShiftLeft) || k.IsKeyPressed(Key.ShiftRight);
-
-            if (_branchSelector.HandleKeyDown(mappedKey, ctrl, shift)) return;
         }
 
         if (IsNavigationOnly(key) || key == Key.Backspace || key == Key.Delete)

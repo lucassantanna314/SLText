@@ -1,5 +1,4 @@
 using SkiaSharp;
-using SLText.Core.Engine.Git;
 using SLText.Core.Engine.Model;
 using SLText.View.Styles;
 using System.Text;

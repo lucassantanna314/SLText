@@ -693,13 +693,15 @@ public partial class WindowManager : IDisposable
         {
             var local = await _gitHubService.ListLocalBranchesAsync();
             var remote = await _gitHubService.ListRemoteBranchesAsync("origin");
-            
+
             InvokeOnUi(() =>
             {
                 _branchSelector.CurrentBranchName = currentBranch;
                 _branchSelector.LocalBranches = local.Select(b => b.Name).ToList();
                 _branchSelector.RemoteBranches = remote;
                 _branchSelector.ResetState();
+                // Compute bounds synchronously for immediate hit-testing (click/wheel)
+                _branchSelector.ComputeBounds(new SKRect(0, 0, _window.Size.X, _window.Size.Y));
                 _branchSelector.IsVisible = true;
             });
         });
