@@ -78,6 +78,9 @@ public partial class WindowManager : IDisposable
     private bool _isLoadingSession = true;
     private int _currentThemeIndex = 0;
 
+    // --- GitHub Integration (Fase 2) ---
+    private readonly Core.Engine.Git.GitHubIntegrationService _gitHubService = new();
+
     public WindowManager(TextBuffer buffer, CursorManager cursor, InputHandler input, string? initialFilePath, EditorSettings settings)
     {
         var options = WindowOptions.Default;
@@ -99,6 +102,28 @@ public partial class WindowManager : IDisposable
         _inputHandler.AddEditorShortcuts(_editor);
 
         _statusBar = new StatusBarComponent(cursor, buffer, _editor);
+
+        // Wire GitHub integration events (Fase 2) — MUST be after _statusBar created
+        _gitHubService.ConnectionStateChanged += (_, state) =>
+        {
+            InvokeOnUi(() =>
+            {
+                if (_statusBar == null) return;
+                
+                if (state.HasActiveRepo && !string.IsNullOrEmpty(state.CurrentBranch))
+                {
+                    _statusBar.SetBranchName(state.CurrentBranch);
+                    _statusBar.SetGitConnection(true);
+                    RefreshExplorerWithGit();
+                }
+                else
+                {
+                    _statusBar.SetBranchName(null);
+                    _statusBar.SetGitConnection(false);
+                    _explorer.ClearSearch(); // No-op if not focused
+                }
+            });
+        };
 
         _tabManager = new TabManager();
         _tabComponent = new TabComponent(_tabManager);
@@ -154,7 +179,7 @@ public partial class WindowManager : IDisposable
 
                     _terminal.WriteOutput("Output", $"Open folder: {folder}", clearFirst: true);
 
-                    Task.Run(() =>
+                    Task.Run(async () =>
                     {
                         try
                         {
@@ -164,6 +189,9 @@ public partial class WindowManager : IDisposable
                             });
 
                             RequestDiagnostics(instant: true);
+
+                            // --- Auto-connect to git if repo exists (Fase 2) ---
+                            await ConnectToRepository(folder);
                         }
                         catch (Exception ex)
                         {
@@ -588,6 +616,8 @@ public partial class WindowManager : IDisposable
 
     public void Dispose()
     {
+        _gitHubService?.Dispose();
+
         _diagnosticCts?.Cancel();
         _diagnosticCts?.Dispose();
         _diagnosticCts = null;
@@ -600,6 +630,45 @@ public partial class WindowManager : IDisposable
         _window?.Dispose();
 
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Schedule an action on the main/render thread.</summary>
+    private void InvokeOnUi(Action action)
+    {
+        // Fire-and-forget: simple pattern works because only one action is queued at a time.
+        Interlocked.CompareExchange(ref _pendingAction, action, null);
+    }
+
+    /// <summary>Refresh explorer with git status when repo state changes.</summary>
+    private void RefreshExplorerWithGit()
+    {
+        // Stub — will call _explorer.RefreshWithGitStatus() once that method exists.
+        _explorer.Refresh();
+    }
+
+    /// <summary>Connect to git repository if path contains a .git directory.</summary>
+    private async Task ConnectToRepository(string path)
+    {
+        try
+        {
+            var gitDir = Path.Combine(path, ".git");
+            if (!Directory.Exists(gitDir)) return;
+
+            await _gitHubService.ConnectToRepositoryAsync(path);
+
+            // UI update happens via ConnectionStateChanged event → InvokeOnUi
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[GitHub] Failed to connect to repo at {path}: {ex.Message}");
+        }
+    }
+
+    /// <summary>Open branch selector overlay (Fase 3 stub).</summary>
+    private void ToggleBranchSelector()
+    {
+        string? branch = _gitHubService.State.CurrentBranch ?? "(no branch)";
+        _modal.Show("Branch Selector", $"Current branch: {branch}\n\n(Fase 3 — implementar overlay completo)", null, null, null);
     }
 
     public void Run() => _window.Run();

@@ -68,6 +68,15 @@ public class GitHubIntegrationService : IDisposable
             State.HasActiveRepo = false;
 
             _git.Open(path);
+
+            // Explicitly update state from git service (StateChanged event may not fire synchronously)
+            if (_git.CurrentBranch != null)
+            {
+                State.CurrentBranch = _git.CurrentBranch;
+            }
+
+            State.PendingPushCount = _git.AheadCount;
+            State.PendingPullCount = _git.BehindCount;
             State.HasActiveRepo = true;
             ConnectionStateChanged?.Invoke(this, State);
 

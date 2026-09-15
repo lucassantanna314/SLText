@@ -48,7 +48,15 @@ public class GitNativeService : IGitRepositoryClient, IDisposable
 
             _repo = new Repository(path);
             RepositoryPath = path;
+
             RefreshState();
+
+            // Fire state change to notify listeners
+            var evt = StateChanged;
+            if (evt != null)
+            {
+                evt.Invoke(this, new GitStateChangedEventArgs());
+            }
         }
     }
 

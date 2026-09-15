@@ -1,9 +1,8 @@
 {
   "FontSize": 16,
-  "LastRootDirectory": "/home/lucas/Dev/Study/ASSync",
+  "LastRootDirectory": "/home/lucas/Dev/SLText",
   "Theme": "Midnight",
   "OpenTabs": [
-    "/home/lucas/Dev/Study/ASSync/ASSync.View/Pages/Clients.razor",
-    "/home/lucas/Dev/Study/ASSync/ASSync.Shared/Models/Clients/ClientViewModel.cs"
+    "/home/lucas/Dev/SLText/SLText.View/Program.cs"
   ]
 }

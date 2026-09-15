@@ -161,6 +161,14 @@ public partial class WindowManager
                 float explorerWidth = _explorer.IsVisible ? _explorer.Width : 0;
 
 
+                // --- BRANCH BUTTON HIT-TEST (Fase 2) ---
+                if (_statusBar.BranchButtonBounds.Left > 0 && 
+                    _statusBar.BranchButtonBounds.Contains(pos.X, pos.Y))
+                {
+                    ToggleBranchSelector();
+                    return;
+                }
+
                 if (_statusBar.SelectorBounds.Contains(pos.X, pos.Y))
                 {
                     OpenRunConfigurationSelector();
@@ -408,7 +416,11 @@ public partial class WindowManager
 
         if (!string.IsNullOrEmpty(_settings.LastRootDirectory) && Directory.Exists(_settings.LastRootDirectory))
         {
+            _lastDirectory = _settings.LastRootDirectory; // Ensure lastDirectory is set for git auto-connect
             SetCurrentFile(_settings.LastRootDirectory);
+
+            // --- Auto-connect to git on startup (Fase 2) ---
+            Task.Run(async () => await ConnectToRepository(_lastDirectory));
         }
 
         if (_settings.OpenTabs != null && _settings.OpenTabs.Count > 0)
