@@ -1,12 +1,27 @@
 # Especificação: Integração GitHub no SLText — Fases Restantes
 
 > **Última atualização:** 2026-09-14
-> **Status atual:** ✅ Fase 2 completa — build passing, branch button funcional na status bar
+> **Status atual:** ✅ Fase 3 completa — BranchSelectorOverlay funcional com wheel, autocomplete
 > **Arquivo anterior completo:** ver git log para histórico de mudanças
 
 ## O que JÁ ESTÁ IMPLEMENTADO
 
-### Fase 2 — Status Bar Integration (COMPLETA) ✅
+### Fase 3 — Branch Selector Overlay (COMPLETA) ✅
+
+| Categoria | Status | Detalhes |
+|-----------|--------|----------|
+| `BranchSelectorOverlay.cs` | ✅ | Novo componente em SLText.View/Components/ |
+| Lista de branches locais | ✅ | Exibidos com bullet ●/○ destacando branch atual |
+| Lista de branches remotos | ✅ | Com indicador ↗ e tracking local quando aplicável |
+| Navegação por teclado | ✅ | ↑↓ navegação, Enter seleciona, Esc fecha/cancela |
+| Mouse interativo | ✅ | Clique seleciona + confirma, scroll na lista |
+| Auto-complete Tab | ✅ | Tab tenta completar nome do branch na seção de criação |
+| Criação de novo branch | ✅ | Campo de texto com cursor inline + SanitizeBranchName |
+| Integração SwitchBranch | ✅ | OnBranchSelected chama _gitHubService.SwitchBranchAsync() |
+| Renderização | ✅ | Chamado no Render.cs com bounds calculados dinamicamente |
+| Theme sync | ✅ | ApplyTheme propaga ao overlay |
+
+### ~~Fase 2~~ — Status Bar Integration (COMPLETA) ✅
 
 | Categoria | Status | Detalhes |
 |-----------|--------|----------|
@@ -129,7 +144,7 @@ Quando Fase 3 for implementada, substituir por `BranchSelectorOverlay.Show(...)`
 | Fase | Título | Est. | Prioridade | Status |
 |------|--------|------|------------|--------|
 | ~~**2**~~ | ~~Status Bar Integration~~ | 4-6h | ~~🔴 Alta~~ | ✅ COMPLETA |
-| **3** | Branch Selector Overlay | 6-8h | 🔴 Alta (funcionalidade central) | ⏭ Próxima |
+| ~~**3**~~ | ~~Branch Selector Overlay~~ | 6-8h | ~~🔴 Alta (funcionalidade central)~~ | ✅ COMPLETA |
 | **4** | Commit Operations Panel | 6-8h | 🟡 Média (visualização rica) | 📋 Em fila |
 | **5** | Advanced Panel Features | 8-10h | 🟡 Média (PRs, changes, diffs) | 📋 Em fila |
 | **6** | Merge & PR Workflow | 6-8h | 🟢 Baixa (operação avançada) | 📋 Em fila |
@@ -141,9 +156,9 @@ Quando Fase 3 for implementada, substituir por `BranchSelectorOverlay.Show(...)`
 
 ## Próximos Passos Recomendados
 
-Começar pela **Fase 3** — Branch Selector Overlay:
-1. Criar `BranchSelectorOverlay.cs` seguindo padrão `AutocompleteComponent` / `ModalComponent`
-2. Lista scrollável com branches locais e remotos
-3. Clique seleciona → chama `_gitHubService.SwitchBranchAsync(name)`
-4. Campo de texto para criar novo branch
-5. Substituir `ToggleBranchSelector()` pelo overlay real
+Começar pela **Fase 4** — Commit Operations Panel:
+1. Criar `CommitPanel.cs` seguindo padrão `BranchSelectorOverlay` / `TerminalComponent`
+2. Mostrar pending changes com status (staged, unstaged, untracked)
+3. Visualização de diff inline por arquivo
+4. Botões para stage/unstage, commit message input
+5. Integrar com `_gitHubService.CommitAsync()`
