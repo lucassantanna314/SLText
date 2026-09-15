@@ -99,7 +99,7 @@ public class GitHubAuthService : IDisposable
                     {
                         AccessToken = pollParams["access_token"]!,
                         RefreshToken = pollParams.GetValueOrDefault("refresh_token"),
-                        ExpiresAtUtc = DateTime.UtcNow.AddSeconds(int.Parse(pollParams["expires_in"]))
+                        ExpiresAtUtc = DateTime.UtcNow.AddSeconds(int.Parse(pollParams["expires_in"] ?? "3600"))
                     };
 
                     AuthStateChanged?.Invoke(this, true);
@@ -141,7 +141,7 @@ public class GitHubAuthService : IDisposable
             CurrentToken.AccessToken = paramsMap["access_token"]!;
             if (paramsMap.TryGetValue("refresh_token", out var newRefresh))
                 CurrentToken.RefreshToken = newRefresh;
-            CurrentToken.ExpiresAtUtc = DateTime.UtcNow.AddSeconds(int.Parse(paramsMap["expires_in"]));
+            CurrentToken.ExpiresAtUtc = DateTime.UtcNow.AddSeconds(int.Parse(paramsMap["expires_in"] ?? "3600"));
 
             // Persist the refreshed token
             await GitHubTokenStore.SaveAsync(CurrentToken);

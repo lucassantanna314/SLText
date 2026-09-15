@@ -52,7 +52,7 @@ public partial class WindowManager : IDisposable
 
     private EditorTheme _currentTheme = EditorTheme.Dark;
 
-    private MouseHandler _mouseHandler;
+    private MouseHandler? _mouseHandler;
     private ModalComponent _modal = new();
     private SearchComponent _search = new();
     private ContextMenuComponent _contextMenu = new();

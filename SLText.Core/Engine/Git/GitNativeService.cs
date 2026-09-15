@@ -272,10 +272,10 @@ public class GitNativeService : IGitRepositoryClient, IDisposable
                     var statuses = RetrieveAllStatus();
                     foreach (var s in statuses.Where(st => st.State != FileStatus.Unaltered && st.State != FileStatus.Nonexistent))
                     {
-                        _repo.Index.Add(s.FilePath);
+                        _repo!.Index.Add(s.FilePath);
                     }
                 }
-                _repo.Commit(message, author, committer, new CommitOptions { AmendPreviousCommit = false, AllowEmptyCommit = true });
+                _repo!.Commit(message, author, committer, new CommitOptions { AmendPreviousCommit = false, AllowEmptyCommit = true });
                 RefreshState();
             });
         }
@@ -289,7 +289,7 @@ public class GitNativeService : IGitRepositoryClient, IDisposable
         {
             await CheckRepo(async () =>
             {
-                var commit = _repo!.Lookup<Commit>(sourceSha);
+                var commit = _repo!.Lookup<Commit>(sourceSha) ?? throw new InvalidOperationException("Commit not found.");
                 var committer = new Signature(new Identity("SLText", "sltext@editor"), DateTimeOffset.Now);
                 _repo.CherryPick(commit, committer, new CherryPickOptions());
             });
@@ -304,7 +304,7 @@ public class GitNativeService : IGitRepositoryClient, IDisposable
         {
             await CheckRepo(async () =>
             {
-                var commit = _repo!.Lookup<Commit>(sha);
+                var commit = _repo!.Lookup<Commit>(sha) ?? throw new InvalidOperationException("Commit not found.");
                 var committer = new Signature(new Identity("SLText", "sltext@editor"), DateTimeOffset.Now);
                 _repo.Revert(commit, committer, new RevertOptions());
                 RefreshState();
@@ -380,7 +380,7 @@ public class GitNativeService : IGitRepositoryClient, IDisposable
                 var statuses = RetrieveAllStatus();
                 foreach (var s in statuses.Where(st => st.State != FileStatus.Unaltered && st.State != FileStatus.Nonexistent && st.State != FileStatus.Unreadable))
                 {
-                    _repo.Index.Add(s.FilePath);
+                    _repo!.Index.Add(s.FilePath);
                 }
                 RefreshState();
             });
@@ -409,7 +409,7 @@ public class GitNativeService : IGitRepositoryClient, IDisposable
                         ? branch
                         : $"refs/heads/{branch}";
 
-                    var entries = _repo.Commits.QueryBy(canonical).Take(count);
+                    var entries = _repo!.Commits.QueryBy(canonical).Take(count);
                     commits = entries.Select(e => e.Commit);
                 }
 

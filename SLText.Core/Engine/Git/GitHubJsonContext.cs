@@ -26,8 +26,6 @@ using Model;
 public sealed partial class GitHubJsonContext : JsonSerializerContext { }
 
 // --- Repository DTO (raw API response, not to be confused with Model.RepositoryInfo) ---
-
-[JsonSerializable(typeof(GitRepositoryDto))]
 public class GitRepositoryDto
 {
     [JsonPropertyName("full_name")]
