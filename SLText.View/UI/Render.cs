@@ -98,6 +98,12 @@ public partial class WindowManager
             _contextMenu.Render(canvas);
         }
 
+        if (_branchSelector.IsVisible)
+        {
+            _branchSelector.ComputeBounds(new SKRect(0, 0, width, height));
+            _branchSelector.Render(canvas, new SKRect(0, 0, width, height));
+        }
+
         _grContext.Flush();
     }
 }

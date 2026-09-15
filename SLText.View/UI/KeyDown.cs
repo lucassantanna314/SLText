@@ -42,7 +42,17 @@ public partial class WindowManager
                 _autocomplete.IsVisible = false;
             }
         }
-        
+
+        // --- Branch selector overlay (Fase 3) ---
+        if (_branchSelector.IsVisible)
+        {
+            string mappedKey = KeyboardMapper.Normalize(key);
+            bool ctrl = k.IsKeyPressed(Key.ControlLeft) || k.IsKeyPressed(Key.ControlRight);
+            bool shift = k.IsKeyPressed(Key.ShiftLeft) || k.IsKeyPressed(Key.ShiftRight);
+
+            if (_branchSelector.HandleKeyDown(mappedKey, ctrl, shift)) return;
+        }
+
         if (IsNavigationOnly(key) || key == Key.Backspace || key == Key.Delete)
         {
             _lastPressedKey = key;

@@ -111,6 +111,7 @@ public partial class WindowManager
         _terminal.ApplyTheme(theme);
         _signatureHelp.ApplyTheme(theme);
         _autocomplete.ApplyTheme(theme);
+        _branchSelector.ApplyTheme(theme);
     }
     
     private void OnWindowClosing()

@@ -78,8 +78,9 @@ public partial class WindowManager : IDisposable
     private bool _isLoadingSession = true;
     private int _currentThemeIndex = 0;
 
-    // --- GitHub Integration (Fase 2) ---
+    // --- GitHub Integration (Fase 2-3) ---
     private readonly Core.Engine.Git.GitHubIntegrationService _gitHubService = new();
+    private BranchSelectorOverlay _branchSelector = new();
 
     public WindowManager(TextBuffer buffer, CursorManager cursor, InputHandler input, string? initialFilePath, EditorSettings settings)
     {
@@ -664,11 +665,44 @@ public partial class WindowManager : IDisposable
         }
     }
 
-    /// <summary>Open branch selector overlay (Fase 3 stub).</summary>
+    /// <summary>Open branch selector overlay (Fase 3).</summary>
     private void ToggleBranchSelector()
     {
-        string? branch = _gitHubService.State.CurrentBranch ?? "(no branch)";
-        _modal.Show("Branch Selector", $"Current branch: {branch}\n\n(Fase 3 — implementar overlay completo)", null, null, null);
+        if (_branchSelector.IsVisible)
+        {
+            _branchSelector.IsVisible = false;
+            return;
+        }
+
+        string? currentBranch = _gitHubService.State.CurrentBranch;
+
+        // Wire up selection callback
+        _branchSelector.OnBranchSelected = async branchName =>
+        {
+            try
+            {
+                await _gitHubService.SwitchBranchAsync(branchName);
+            }
+            catch (Exception ex)
+            {
+                _modal.Show("Erro", $"Falha ao alternar branch '{branchName}': {ex.Message}", null, null, null);
+            }
+        };
+
+        Task.Run(async () =>
+        {
+            var local = await _gitHubService.ListLocalBranchesAsync();
+            var remote = await _gitHubService.ListRemoteBranchesAsync("origin");
+            
+            InvokeOnUi(() =>
+            {
+                _branchSelector.CurrentBranchName = currentBranch;
+                _branchSelector.LocalBranches = local.Select(b => b.Name).ToList();
+                _branchSelector.RemoteBranches = remote;
+                _branchSelector.ResetState();
+                _branchSelector.IsVisible = true;
+            });
+        });
     }
 
     public void Run() => _window.Run();

@@ -158,11 +158,17 @@ public partial class WindowManager
                 if (_autocomplete.IsVisible) _autocomplete.IsVisible = false;
                 if (_signatureHelp.IsVisible) _signatureHelp.IsVisible = false;
 
+                // --- Branch selector overlay (Fase 3) ---
+                if (_branchSelector.IsVisible)
+                {
+                    if (_branchSelector.HandleClick(pos.X, pos.Y)) return;
+                }
+
                 float explorerWidth = _explorer.IsVisible ? _explorer.Width : 0;
 
 
                 // --- BRANCH BUTTON HIT-TEST (Fase 2) ---
-                if (_statusBar.BranchButtonBounds.Left > 0 && 
+                if (_statusBar.BranchButtonBounds.Left > 0 &&
                     _statusBar.BranchButtonBounds.Contains(pos.X, pos.Y))
                 {
                     ToggleBranchSelector();
@@ -328,6 +334,13 @@ public partial class WindowManager
             mouse.Scroll += (m, scroll) =>
             {
                 var pos = m.Position;
+
+                // --- Branch selector overlay wheel (Fase 3) ---
+                if (_branchSelector.IsVisible && _branchSelector.Bounds.Contains(pos.X, pos.Y))
+                {
+                    _branchSelector.HandleWheel(scroll.Y * 10);
+                    return;
+                }
 
                 bool isShiftPressed = false;
                 foreach (var kbd in input.Keyboards)

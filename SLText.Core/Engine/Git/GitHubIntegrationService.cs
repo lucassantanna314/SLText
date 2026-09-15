@@ -121,6 +121,20 @@ public class GitHubIntegrationService : IDisposable
         await _git.SwitchBranchAsync(branchName);
     }
 
+    /// <summary>List local branches in the connected repository.</summary>
+    public async Task<List<GitBranch>> ListLocalBranchesAsync()
+    {
+        if (!State.HasActiveRepo) throw new InvalidOperationException("No repository connected.");
+        return await _git.ListLocalBranchesAsync();
+    }
+
+    /// <summary>List remote branches for the given remote (default: origin).</summary>
+    public async Task<List<RemoteBranch>> ListRemoteBranchesAsync(string remote = "origin")
+    {
+        if (!State.HasActiveRepo) throw new InvalidOperationException("No repository connected.");
+        return await _git.ListRemoteBranchesAsync(remote);
+    }
+
     /// <summary>Push local commits to the remote.</summary>
     public async Task PushAsync()
     {
