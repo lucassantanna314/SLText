@@ -1,17 +1,22 @@
 using SkiaSharp;
+using Silk.NET.Input;
 using SLText.Core.Engine.Model;
 using SLText.View.Abstractions;
+using SLText.View.UI.Input;
 using SLText.View.Styles;
 
 namespace SLText.View.Components;
 
-public class FileExplorerComponent : IComponent
+public class FileExplorerComponent : IComponent, IInputElement
 {
     public SKRect Bounds { get; set; }
     public bool IsVisible { get; set; } = false;
     public float Width { get; set; } = 250;
     private EditorTheme _theme = EditorTheme.Dark;
     private readonly SKFont _font;
+
+    // Explicit IInputElement members
+    bool IInputElement.IsActive => IsVisible;
     
     private List<FileNode> _rootNodes = new();
     private string? _currentRootPath;
@@ -124,6 +129,56 @@ public class FileExplorerComponent : IComponent
                 break;
         }
     }
+
+    #region IInputElement
+
+    bool IInputElement.HandleKeyDown(IKeyboard keyboard, Key key)
+    {
+        if (!IsVisible || !IsFocused) return false;
+
+        var mappedKey = KeyboardMapper.Normalize(key);
+        HandleKeyDown(mappedKey);
+        return true; // consume when active
+    }
+
+    bool IInputElement.HandleKeyUp(IKeyboard keyboard, Key key) => false;
+
+    bool IInputElement.HandleClick(float x, float y)
+    {
+        if (!IsVisible) return false;
+
+        // Click on search area focuses it
+        if (y < Bounds.Top + 40 && Bounds.Contains(x, y))
+        {
+            IsFocused = true;
+            return true;
+        }
+
+        // Click on node list — hit-test via GetNodeAt
+        var node = GetNodeAt(x, y);
+        if (node != null)
+        {
+            HandleMouseClick(node);
+            if (!node.IsDirectory)
+            {
+                _selectedFilePath = node.FullPath;
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    bool IInputElement.HandleWheel(float deltaX, float deltaY)
+    {
+        if (!IsVisible) return false;
+
+        float scrollSpeed = 25f;
+        ApplyScroll(0, -deltaY * scrollSpeed);
+        return true;
+    }
+
+    #endregion
     
     public void ResetScroll()
     {

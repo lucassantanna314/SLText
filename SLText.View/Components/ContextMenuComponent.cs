@@ -1,4 +1,7 @@
 using SkiaSharp;
+using Silk.NET.Input;
+using SLText.View.Abstractions;
+using SLText.View.UI.Input;
 using SLText.View.Styles;
 namespace SLText.Components;
 
@@ -9,7 +12,7 @@ public class ContextMenuItem
     public Action Action { get; set; } = () => { };
 }
 
-public class ContextMenuComponent : View.Abstractions.IComponent
+public class ContextMenuComponent : View.Abstractions.IComponent, IInputElement
 {
     public SKRect Bounds { get; set; }
     public bool IsVisible { get; set; }
@@ -18,6 +21,9 @@ public class ContextMenuComponent : View.Abstractions.IComponent
     private readonly SKFont _shortcutFont;
     private EditorTheme _theme = EditorTheme.Dark;
     private int _hoveredIndex = -1;
+
+    // Explicit IInputElement members
+    bool IInputElement.IsActive => IsVisible;
 
     public ContextMenuComponent()
     {
@@ -38,6 +44,37 @@ public class ContextMenuComponent : View.Abstractions.IComponent
 
         Bounds = new SKRect(x, y, x + width, y + height);
     }
+
+    #region IInputElement
+
+    bool IInputElement.HandleKeyDown(IKeyboard keyboard, Key key)
+    {
+        if (!IsVisible) return false;
+        // Context menu dismisses on Escape (handled by caller's click path) — not keyboard-driven.
+        return false;
+    }
+
+    bool IInputElement.HandleKeyUp(IKeyboard keyboard, Key key) => false;
+
+    bool IInputElement.HandleClick(float x, float y)
+    {
+        if (!IsVisible) return false;
+
+        if (Bounds.Contains(x, y) && _hoveredIndex >= 0 && _hoveredIndex < Items.Count)
+        {
+            var item = Items[_hoveredIndex];
+            IsVisible = false;
+            item.Action?.Invoke();
+            return true;
+        }
+
+        IsVisible = false;
+        return true; // consume clicks outside items to dismiss
+    }
+
+    bool IInputElement.HandleWheel(float deltaX, float deltaY) => false;
+
+    #endregion
 
     public void ApplyTheme(EditorTheme theme) => _theme = theme;
 

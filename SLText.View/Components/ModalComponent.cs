@@ -1,27 +1,30 @@
 using SkiaSharp;
+using Silk.NET.Input;
+using SLText.View.UI.Input;
 using SLText.View.Styles;
 
 namespace SLText.View.Components;
 
-public class ModalComponent
+public class ModalComponent : IInputElement
 {
     public bool IsVisible { get; set; }
     public string Title { get; set; } = "Confirmação";
     public string Message { get; set; } = "";
-    
+
     public Action? OnYes { get; set; }
     public Action? OnNo { get; set; }
     public Action? OnCancel { get; set; }
-    
+
     private SKRect _yesBtn;
     private SKRect _noBtn;
     private SKRect _cancelBtn;
-    
-    private readonly SKFont _font;
-    private readonly SKFont _fontBold;
+    private SKRect _bounds; // IInputElement.Bounds
+
+    readonly SKFont _font;
+    readonly SKFont _fontBold;
     private DateTime _lastClosedTime = DateTime.MinValue;
     public bool IsRecentlyClosed => (DateTime.Now - _lastClosedTime).TotalMilliseconds < 100;
-    
+
     private EditorTheme _theme = EditorTheme.Dark;
     public void ApplyTheme(EditorTheme theme) => _theme = theme;
     
@@ -43,6 +46,37 @@ public class ModalComponent
         _fontBold = new SKFont(typeface, 16) { Embolden = true };
     }
 
+    #region IInputElement
+
+    SKRect IInputElement.Bounds => _bounds;
+
+    bool IInputElement.IsActive => IsVisible;
+
+    bool IInputElement.HandleKeyDown(IKeyboard keyboard, Key key)
+    {
+        var mappedKey = KeyboardMapper.Normalize(key);
+        bool ctrl = keyboard.IsKeyPressed(Key.ControlLeft) || keyboard.IsKeyPressed(Key.ControlRight);
+        bool shift = keyboard.IsKeyPressed(Key.ShiftLeft) || keyboard.IsKeyPressed(Key.ShiftRight);
+        return HandleKeyDown(mappedKey, ctrl, shift);
+    }
+
+    bool IInputElement.HandleKeyUp(IKeyboard keyboard, Key key) => false;
+
+    bool IInputElement.HandleClick(float x, float y)
+    {
+        if (!IsVisible) return false;
+
+        if (_yesBtn.Contains(x, y)) { CloseWithAction(OnYes); return true; }
+        if (_noBtn.Contains(x, y)) { CloseWithAction(OnNo); return true; }
+        if (_cancelBtn.Contains(x, y)) { CloseWithAction(OnCancel); return true; }
+
+        return true; // consume clicks inside dialog
+    }
+
+    bool IInputElement.HandleWheel(float deltaX, float deltaY) => false;
+
+    #endregion
+
     public void Render(SKCanvas canvas, SKRect windowBounds, EditorTheme theme)
     {
         if (!IsVisible) return;
@@ -58,6 +92,9 @@ public class ModalComponent
             windowBounds.MidX + width / 2,
             windowBounds.MidY + height / 2
         );
+
+        // Store bounds for IInputElement hit-testing
+        _bounds = rect;
 
         using var bgPaint = new SKPaint { Color = theme.Background, IsAntialias = true };
         canvas.DrawRoundRect(rect, 8, 8, bgPaint);

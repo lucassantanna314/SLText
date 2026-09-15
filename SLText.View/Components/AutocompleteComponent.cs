@@ -1,12 +1,17 @@
 using SkiaSharp;
+using Silk.NET.Input;
+using SLText.View.UI.Input;
 using SLText.View.Styles;
 
 namespace SLText.View.Components;
 
-public class AutocompleteComponent
+public class AutocompleteComponent : IInputElement
 {
     public SKRect Bounds { get; set; }
     public bool IsVisible { get; set; }
+
+    // Explicit IInputElement members
+    bool IInputElement.IsActive => IsVisible;
     
     private List<string> _items = new();
     private int _selectedIndex = 0;
@@ -23,6 +28,51 @@ public class AutocompleteComponent
     {
         _font = font;
     }
+
+    #region IInputElement
+
+    bool IInputElement.HandleKeyDown(IKeyboard keyboard, Key key)
+    {
+        if (!IsVisible) return false;
+
+        var mappedKey = KeyboardMapper.Normalize(key);
+        
+        // Up/Down navigation
+        if (mappedKey == "Up") { MoveSelection(-1); return true; }
+        if (mappedKey == "Down") { MoveSelection(1); return true; }
+
+        // Tab or Enter to accept
+        if (mappedKey == "Tab" || mappedKey == "Enter") { return true; } // caller should act on GetCurrentItem()
+
+        // Escape dismisses
+        if (mappedKey == "Escape") { IsVisible = false; return true; }
+
+        // Navigation keys close autocomplete
+        if (mappedKey is "Left" or "Right" or "Home" or "End" or "PageUp" or "PageDown")
+        {
+            IsVisible = false;
+            return true;
+        }
+
+        return false;
+    }
+
+    bool IInputElement.HandleKeyUp(IKeyboard keyboard, Key key) => false;
+
+    bool IInputElement.HandleClick(float x, float y)
+    {
+        if (!IsVisible) return false;
+        SelectIndexByMouseY(y);
+        return true; // consumed — caller should decide what to do with it
+    }
+
+    bool IInputElement.HandleWheel(float deltaX, float deltaY)
+    {
+        // Not directly used here; wheel scrolls whatever is behind
+        return false;
+    }
+
+    #endregion
     
     public void ApplyTheme(EditorTheme theme) => _theme = theme;
 

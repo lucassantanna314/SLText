@@ -135,133 +135,15 @@ public partial class WindowManager
             {
                 var pos = m.Position;
 
-                if (button == MouseButton.Left && _contextMenu.IsVisible)
+                // --- Centralized input dispatch ---
+                if (_inputManager.ProcessClick(pos.X, pos.Y)) return;
+
+                // Default behavior when no overlay consumed the click:
+                // Right-click opens context menu
+                if (button == MouseButton.Right && _editor.Bounds.Contains(pos.X, pos.Y))
                 {
-                    if (_contextMenu.HandleClick(pos.X, pos.Y)) return;
-                }
-                else if (_contextMenu.IsVisible)
-                {
-                    _contextMenu.IsVisible = false;
-                }
-
-                if (_autocomplete.IsVisible && _autocomplete.Bounds.Contains(pos.X, pos.Y))
-                {
-                    bool clickedValidItem = _autocomplete.SelectIndexByMouseY(pos.Y);
-
-                    if (clickedValidItem)
-                    {
-                        ApplyAutocomplete();
-                        return;
-                    }
-                }
-
-                if (_autocomplete.IsVisible) _autocomplete.IsVisible = false;
-                if (_signatureHelp.IsVisible) _signatureHelp.IsVisible = false;
-
-                // --- Branch selector overlay (Fase 3) ---
-                if (_branchSelector.IsVisible)
-                {
-                    if (_branchSelector.HandleClick(pos.X, pos.Y)) return;
-                }
-
-                float explorerWidth = _explorer.IsVisible ? _explorer.Width : 0;
-
-
-                // --- BRANCH BUTTON HIT-TEST (Fase 2) ---
-                if (_statusBar.BranchButtonBounds.Left > 0 &&
-                    _statusBar.BranchButtonBounds.Contains(pos.X, pos.Y))
-                {
-                    ToggleBranchSelector();
+                    _editor.HandleRightClick(pos.X, pos.Y);
                     return;
-                }
-
-                if (_statusBar.SelectorBounds.Contains(pos.X, pos.Y))
-                {
-                    OpenRunConfigurationSelector();
-                    return;
-                }
-
-                if (_statusBar.PlayButtonBounds.Contains(pos.X, pos.Y))
-                {
-                    ExecuteActiveConfiguration();
-                    return;
-                }
-
-                if (_terminal.IsVisible && _terminal.Bounds.Contains(pos.X, pos.Y))
-                {
-                    _isTerminalFocused = true;
-                    _explorer.IsFocused = false;
-                    _terminal.OnMouseDown(pos.X, pos.Y);
-                    return;
-                }
-
-                if (_terminal.IsVisible && Math.Abs(pos.Y - _terminal.Bounds.Top) < 15 && pos.X > explorerWidth)
-                {
-                    _terminal.OnMouseDown(pos.X, pos.Y);
-                    return;
-                }
-
-                if (_editor.Bounds.Contains(pos.X, pos.Y) || _explorer.Bounds.Contains(pos.X, pos.Y))
-                {
-                    _isTerminalFocused = false;
-                }
-
-                if (_explorer.IsVisible && _explorer.IsOnResizeBorder(pos.X))
-                {
-                    _isResizingExplorer = true;
-                    return;
-                }
-
-                if (_explorer.IsVisible && _explorer.Bounds.Contains(pos.X, pos.Y))
-                {
-                    if (pos.Y < _explorer.Bounds.Top + 40)
-                    {
-                        _explorer.IsFocused = true;
-                    }
-                    else
-                    {
-                        _explorer.IsFocused = false;
-                        _explorer.OnMouseDown(pos.X, pos.Y);
-                    }
-
-                    return;
-                }
-
-                if (_explorer.IsFocused)
-                {
-                    _explorer.ClearSearch();
-                    _explorer.IsFocused = false;
-                }
-
-                int clickedIndex = _tabComponent.GetTabIndexAt(pos.X, pos.Y);
-                if (clickedIndex != -1)
-                {
-                    // IsCloseButtonAt already restricts itself to the active tab, matching what is
-                    // actually drawn; no need to select first.
-                    if (_tabComponent.IsCloseButtonAt(pos.X, pos.Y))
-                    {
-                        CloseActiveTab();
-                        return;
-                    }
-
-                    // Persist the outgoing tab's scroll position before switching, so coming back
-                    // restores the view instead of jumping to the top.
-                    SaveActiveTabScroll();
-
-                    _tabManager.SelectTab(clickedIndex);
-                    SyncActiveTab(false);
-                    return;
-                }
-
-                if (_editor.Bounds.Contains(pos.X, pos.Y))
-                {
-                    if (button == MouseButton.Right)
-                    {
-                        _editor.HandleRightClick(pos.X, pos.Y);
-                        return;
-                    }
-                    if (_editor.OnMouseDown(pos.X, pos.Y)) return;
-                    _mouseHandler.OnMouseDown(pos.X, pos.Y, button);
                 }
             };
 
@@ -335,12 +217,8 @@ public partial class WindowManager
             {
                 var pos = m.Position;
 
-                // --- Branch selector overlay wheel (Fase 3) ---
-                if (_branchSelector.IsVisible && _branchSelector.Bounds.Contains(pos.X, pos.Y))
-                {
-                    _branchSelector.HandleWheel(scroll.Y * 10);
-                    return;
-                }
+                // --- Centralized input dispatch ---
+                if (_inputManager.ProcessWheel(pos.X, pos.Y, scroll.Y * 10)) return;
 
                 bool isShiftPressed = false;
                 foreach (var kbd in input.Keyboards)

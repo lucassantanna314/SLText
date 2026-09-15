@@ -1,15 +1,20 @@
 using SkiaSharp;
+using Silk.NET.Input;
 using SLText.Core.Engine.Model;
+using SLText.View.UI.Input;
 using SLText.View.Styles;
 using System.Text;
 
 namespace SLText.View.Components;
 
 /// <summary>Branch selector overlay — local &amp; remote branches, switching &amp; creating.</summary>
-public class BranchSelectorOverlay
+public class BranchSelectorOverlay : IInputElement
 {
     public bool IsVisible { get; set; }
     public SKRect Bounds { get; private set; }
+
+    // Explicit IInputElement members
+    bool IInputElement.IsActive => IsVisible;
 
     // Data — populated by WindowManager after async load
     internal List<string> LocalBranches { get; set; } = new();
@@ -283,6 +288,7 @@ public class BranchSelectorOverlay
     }
 
     /// <summary>Handle keyboard input while overlay is visible. Returns true if consumed.</summary>
+    /// <remarks>Internal helper — accepts string key name for backwards compatibility.</remarks>
     public bool HandleKeyDown(string key, bool ctrl, bool shift)
     {
         if (!IsVisible) return false;
@@ -369,8 +375,22 @@ public class BranchSelectorOverlay
         return false;
     }
 
-    /// <summary>Handle mouse click. Returns true if consumed.</summary>
-    public bool HandleClick(float x, float y)
+    #region IInputElement
+
+    bool IInputElement.HandleKeyDown(IKeyboard keyboard, Key key)
+    {
+        if (!IsVisible) return false;
+
+        var mappedKey = KeyboardMapper.Normalize(key);
+        bool ctrl = keyboard.IsKeyPressed(Key.ControlLeft) || keyboard.IsKeyPressed(Key.ControlRight);
+        bool shift = keyboard.IsKeyPressed(Key.ShiftLeft) || keyboard.IsKeyPressed(Key.ShiftRight);
+
+        return HandleKeyDown(mappedKey, ctrl, shift);
+    }
+
+    bool IInputElement.HandleKeyUp(IKeyboard keyboard, Key key) => false;
+
+    bool IInputElement.HandleClick(float x, float y)
     {
         if (!IsVisible) return false;
 
@@ -390,7 +410,7 @@ public class BranchSelectorOverlay
         if (clickedIndex >= 0 && clickedIndex < totalItems)
         {
             _selectedIndex = ClampIndex(clickedIndex, totalItems);
-            
+
             // Switch on first click
             CommitSelection();
             return true;
@@ -410,10 +430,9 @@ public class BranchSelectorOverlay
         return true;
     }
 
-    /// <summary>Mouse wheel scroll support.</summary>
-    public void HandleWheel(float deltaY)
+    bool IInputElement.HandleWheel(float deltaX, float deltaY)
     {
-        if (!IsVisible) return;
+        if (!IsVisible) return false;
 
         int totalItems = CountTotalItems();
         int visibleCount = (int)((Bounds.Height - HeaderHeight) / ItemHeight);
@@ -423,7 +442,11 @@ public class BranchSelectorOverlay
             _scrollOffset = Math.Min(maxScroll, _scrollOffset + 1);
         else if (deltaY < 0)
             _scrollOffset = Math.Max(0, _scrollOffset - 1);
+
+        return true;
     }
+
+    #endregion
 
     private void MoveSelection(int delta)
     {

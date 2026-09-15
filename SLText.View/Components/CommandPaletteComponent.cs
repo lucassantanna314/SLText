@@ -1,15 +1,20 @@
 using SkiaSharp;
+using Silk.NET.Input;
 using SLText.Core.Engine;
 using SLText.View.Abstractions;
+using SLText.View.UI.Input;
 using SLText.View.Styles;
 
 namespace SLText.View.Components;
 
-public class CommandPaletteComponent : IComponent
+public class CommandPaletteComponent : IComponent, IInputElement
 {
     public SKRect Bounds { get; set; }
     public bool IsVisible { get; set; }
     private EditorTheme _theme = EditorTheme.Dark;
+
+    // Explicit IInputElement members
+    bool IInputElement.IsActive => IsVisible;
     
     private string _filterText = "";
     private List<EditorCommand> _allCommands = new();
@@ -31,6 +36,42 @@ public class CommandPaletteComponent : IComponent
         _font = new SKFont(typeface, 14);
         _shortcutFont = new SKFont(typeface, 11);
     }
+
+    #region IInputElement
+
+    SKRect IInputElement.Bounds => Bounds;
+
+    bool IInputElement.HandleKeyDown(IKeyboard keyboard, Key key)
+    {
+        if (!IsVisible) return false;
+
+        var mappedKey = KeyboardMapper.Normalize(key);
+
+        if (mappedKey == "Escape") { IsVisible = false; return true; }
+        if (mappedKey == "Up") { MoveSelection(-1); return true; }
+        if (mappedKey == "Down") { MoveSelection(1); return true; }
+        if (mappedKey == "Backspace") { HandleInput("", backspace: true); return true; }
+        if (mappedKey == "Enter")
+        {
+            var cmd = GetSelectedCommand();
+            if (cmd != null)
+            {
+                IsVisible = false;
+                cmd.Action.Invoke();
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    bool IInputElement.HandleKeyUp(IKeyboard keyboard, Key key) => false;
+
+    bool IInputElement.HandleClick(float x, float y) => false; // not interactive via click
+
+    bool IInputElement.HandleWheel(float deltaX, float deltaY) => false;
+
+    #endregion
     
     public void LoadCommands(List<EditorCommand> commands)
     {

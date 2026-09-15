@@ -8,57 +8,17 @@ public partial class WindowManager
 {
     private void OnKeyDown(IKeyboard k, Key key, int arg3)
     {
-        // --- Branch selector overlay takes highest priority when visible (Fase 3) ---
-        if (_branchSelector.IsVisible)
-        {
-            string mappedKey = KeyboardMapper.Normalize(key);
-            bool ctrl = k.IsKeyPressed(Key.ControlLeft) || k.IsKeyPressed(Key.ControlRight);
-            bool shift = k.IsKeyPressed(Key.ShiftLeft) || k.IsKeyPressed(Key.ShiftRight);
+        // --- Dispatch to centralized input manager first ---
+        if (_inputManager.ProcessKeyDown(k, key)) return;
 
-            if (_branchSelector.HandleKeyDown(mappedKey, ctrl, shift)) return;
-        }
-
-        if (_explorer.IsFocused && _explorer.IsVisible)
-        {
-            if (key == Key.Up) { _explorer.HandleKeyDown("Up"); return; }
-            if (key == Key.Down) { _explorer.HandleKeyDown("Down"); return; }
-            if (key == Key.Enter) { _explorer.HandleKeyDown("Enter"); return; }
-            if (key == Key.Escape) { _explorer.ClearSearch(); return; }
-        }
-        
-        if (_signatureHelp.IsVisible)
-        {
-            if (key == Key.Left || key == Key.Right || key == Key.Home || key == Key.End || key == Key.PageUp || key == Key.PageDown)
-            {
-                _signatureHelp.IsVisible = false;
-            }
-        }
-        
-        if (_autocomplete.IsVisible)
-        {
-            if (key == Key.Up) { _autocomplete.MoveSelection(-1); return; }
-            if (key == Key.Down) { _autocomplete.MoveSelection(1); return; }
-            
-            if (key == Key.Tab || key == Key.Enter)
-            {
-                ApplyAutocomplete();
-                return; 
-            }
-            
-            if (key == Key.Escape) { _autocomplete.IsVisible = false; return; }
-
-            if (key == Key.Left || key == Key.Right || key == Key.Home || key == Key.End || key == Key.PageUp || key == Key.PageDown)
-            {
-                _autocomplete.IsVisible = false;
-            }
-        }
+        // If nothing consumed it, fall through to WindowManager default behavior.
 
         if (IsNavigationOnly(key) || key == Key.Backspace || key == Key.Delete)
         {
             _lastPressedKey = key;
             _repeatTimer = 0;
             _isFirstRepeat = true;
-            
+
             if (key == Key.Backspace || key == Key.Delete)
             {
                 RequestDiagnostics();
@@ -66,22 +26,23 @@ public partial class WindowManager
         }
         else
         {
-            _lastPressedKey = null; 
+            _lastPressedKey = null;
         }
 
         ProcessKeyPress(key);
-        
+
         if (key == Key.Backspace || key == Key.Delete || (key == Key.V && _activeKeyboard!.IsKeyPressed(Key.ControlLeft)))
         {
             RequestDiagnostics();
         }
-        
     }
+
     private void ProcessKeyPress(Key key)
     {
         bool ctrl = _activeKeyboard!.IsKeyPressed(Key.ControlLeft) || _activeKeyboard.IsKeyPressed(Key.ControlRight);
         bool shift = _activeKeyboard.IsKeyPressed(Key.ShiftLeft) || _activeKeyboard.IsKeyPressed(Key.ShiftRight);
 
+        // Terminal-focused mode — only when terminal has focus and no overlay consumed
         if (_isTerminalFocused && _terminal.IsVisible)
         {
             if (key == Key.Up || key == Key.Down)
@@ -109,27 +70,10 @@ public partial class WindowManager
             }
 
             if (IsNavigationOnly(key)) return;
-
             if (!ctrl) return;
         }
 
-        if (_commandPalette.IsVisible)
-        {
-            if (key == Key.Escape) { _commandPalette.IsVisible = false; return; }
-            if (key == Key.Up) { _commandPalette.MoveSelection(-1); return; }
-            if (key == Key.Down) { _commandPalette.MoveSelection(1); return; }
-            if (key == Key.Backspace) { _commandPalette.HandleInput("", true); return; }
-            if (key == Key.Enter)
-            {
-                var cmd = _commandPalette.GetSelectedCommand();
-                if (cmd != null)
-                {
-                    _commandPalette.IsVisible = false;
-                    cmd.Action.Invoke();
-                }
-                return;
-            }
-        }
+        // Command palette character input is handled via CharEvent, not here.
 
         if (ctrl && shift && key == Key.P)
         {
@@ -167,7 +111,6 @@ public partial class WindowManager
             if (key == Key.Backspace)
             {
                 _search.HandleInput("", true);
-
                 _editor.PerformSearch(_search.SearchText);
 
                 var searchResult = _buffer.FindNext(_search.SearchText, _cursor.Line, 0);
@@ -181,14 +124,11 @@ public partial class WindowManager
 
             if (key == Key.Enter)
             {
-                // Procura a partir da posição atual do cursor + 1
                 var nextResult = _buffer.FindNext(_search.SearchText, _cursor.Line, _cursor.Column + 1);
-
                 if (nextResult.HasValue)
                 {
                     _cursor.SetSelection(nextResult.Value.line, nextResult.Value.col,
                         nextResult.Value.line, nextResult.Value.col + _search.SearchText.Length);
-
                     _editor.RequestScrollToCursor();
                 }
                 else

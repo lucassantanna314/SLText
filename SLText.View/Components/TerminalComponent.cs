@@ -5,6 +5,7 @@ using SkiaSharp;
 using SLText.Core.Engine;
 using SLText.Core.Engine.LSP;
 using SLText.View.Abstractions;
+using SLText.View.UI.Input;
 using SLText.View.Styles;
 
 namespace SLText.View.Components;
@@ -30,12 +31,15 @@ public class TerminalInstance
     }
 }
 
-public class TerminalComponent : IComponent
+public class TerminalComponent : IComponent, IInputElement
 {
     public SKRect Bounds { get; set; }
     public bool IsVisible { get; set; } = false;
     public float Height { get; set; } = 200;
 
+    // Explicit IInputElement members
+    bool IInputElement.IsActive => IsVisible;
+    
     private readonly SKFont _font;
     private EditorTheme _theme = EditorTheme.Dark;
     private const float LineSpacing = 5;
@@ -540,6 +544,98 @@ public class TerminalComponent : IComponent
         while (ActiveTerminal.CurrentInput.Length > 0) HandleKeyDown("Backspace");
         foreach (char c in cmd) HandleKeyDown(c.ToString());
     }
+
+    #region IInputElement
+
+    bool IInputElement.HandleKeyDown(IKeyboard keyboard, Key key)
+    {
+        if (!IsVisible) return false;
+        
+        // Only accept input when terminal is focused or we're checking for focus
+        // Actually, the terminal always captures its own keys when visible — WindowManager
+        // delegates via ProcessKeyDown. We handle up/down/history navigation.
+        
+        if (key == Key.Up || key == Key.Down)
+        {
+            HandleSpecialKey(key);
+            return true;
+        }
+
+        if (key == Key.Escape)
+        {
+            // Terminal stays visible but loses focus — WindowManager handles unfocus
+            return false; // let WindowManager process escape
+        }
+
+        if (key == Key.Enter)
+        {
+            HandleKeyDown("\n");
+            return true;
+        }
+
+        if (key == Key.Backspace)
+        {
+            HandleKeyDown("Backspace");
+            return true;
+        }
+
+        // Navigation keys are ignored in terminal (they go through SpecialKey only for Up/Down)
+        return false;
+    }
+
+    bool IInputElement.HandleKeyUp(IKeyboard keyboard, Key key) => false;
+
+    bool IInputElement.HandleClick(float x, float y)
+    {
+        if (!IsVisible) return false;
+
+        // Hit-test resize bar
+        if (Math.Abs(y - Bounds.Top) < 15)
+        {
+            _isResizing = true;
+            _lastMouseY = y;
+            return true;
+        }
+
+        // Tab click area
+        if (y >= Bounds.Top && y <= Bounds.Top + TabHeight)
+        {
+            float relX = x - Bounds.Left;
+            for (int i = 0; i < _terminals.Count; i++)
+            {
+                float tabStartX = i * (TabWidth + 1);
+                float tabEndX = tabStartX + TabWidth;
+                if (relX >= tabStartX && relX <= tabEndX)
+                {
+                    if (relX > tabEndX - 25)
+                        CloseTab(i);
+                    else
+                        _activeTabIndex = i;
+                    return true;
+                }
+            }
+            // + button
+            float plusBtnStart = _terminals.Count * (TabWidth + 1);
+            if (relX > plusBtnStart && relX < plusBtnStart + 40)
+            {
+                CreateNewTab("bash", forceNew: true);
+                return true;
+            }
+            return true;
+        }
+
+        // Content area — just consume
+        return true;
+    }
+
+    bool IInputElement.HandleWheel(float deltaX, float deltaY)
+    {
+        if (!IsVisible) return false;
+        ApplyScroll(deltaY * -25f);
+        return true;
+    }
+
+    #endregion
 
     public void OnMouseDown(float x, float y)
     {

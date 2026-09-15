@@ -82,6 +82,9 @@ public partial class WindowManager : IDisposable
     private readonly Core.Engine.Git.GitHubIntegrationService _gitHubService = new();
     private BranchSelectorOverlay _branchSelector = new();
 
+    /// <summary>Centralized input dispatcher replacing scattered if/else chains.</summary>
+    private InputManager _inputManager = new();
+
     public WindowManager(TextBuffer buffer, CursorManager cursor, InputHandler input, string? initialFilePath, EditorSettings settings)
     {
         var options = WindowOptions.Default;
@@ -705,6 +708,17 @@ public partial class WindowManager : IDisposable
                 _branchSelector.IsVisible = true;
             });
         });
+
+        // --- Register all input elements with centralized dispatcher ---
+        // Lower registerOrder = higher keyboard priority
+        _inputManager.Add(_modal, registerOrder: 1);
+        _inputManager.Add(_branchSelector, registerOrder: 2);
+        _inputManager.Add(_commandPalette, registerOrder: 3);
+        _inputManager.Add(_autocomplete, registerOrder: 4);
+        _inputManager.Add(_search, registerOrder: 5);
+        _inputManager.Add(_contextMenu, registerOrder: 6);
+        _inputManager.Add(_explorer, registerOrder: 7);
+        _inputManager.Add(_terminal, registerOrder: 8);
     }
 
     public void Run() => _window.Run();
